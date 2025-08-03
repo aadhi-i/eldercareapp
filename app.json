@@ -3,15 +3,17 @@
     "name": "eldercareapp",
     "slug": "eldercareapp",
     "version": "1.0.0",
+    "owner": "aadhi-i",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "eldercareapp",
+    "scheme": "https",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
     "android": {
+       "package": "com.adithyasnair.eldercare",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -38,6 +40,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "3e5495bb-f023-47bf-a704-af38e74cc22e"
+      }
     }
   }
 }
