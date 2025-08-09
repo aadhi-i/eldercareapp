@@ -1,4 +1,4 @@
-import { default as React, default as React } from 'react';
+import { default as React } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import DrawerLayout from '../components/DrawerLayout';
 
@@ -11,28 +11,12 @@ export default function Dashboard() {
           <Text style={styles.cardTitle}>Upcoming Medications</Text>
           <Text style={styles.cardContent}>• Paracetamol — 8:00 AM{"\n"}• Vitamin D — 12:00 PM</Text>
         </View>
-  return (
-    <DrawerLayout>
-      <ScrollView contentContainerStyle={styles.container}>
-        {/* Medicine Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>💊 Medicines</Text>
-          <Text style={styles.cardContent}>• Paracetamol - 8:00 AM{"\n"}• Vitamin D - 12:00 PM</Text>
-        </View>
 
         {/* Daily Routine Card */}
         <View style={styles.cardWhite}>
           <Text style={styles.cardTitle}>Upcoming Routines</Text>
           <Text style={styles.cardContent}>
             • Morning Walk — 6:30 AM{"\n"}• Breakfast — 8:30 AM{"\n"}• Lunch — 1:00 PM
-          </Text>
-        </View>
-      </ScrollView>
-        {/* Daily Routine Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>📅 Daily Routine</Text>
-          <Text style={styles.cardContent}>
-            • Morning Walk - 6:30 AM{"\n"}• Breakfast - 8:30 AM{"\n"}• Lunch - 1:00 PM
           </Text>
         </View>
       </ScrollView>
@@ -46,15 +30,14 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     backgroundColor: '#fff',
   },
-  card: {
-    backgroundColor: 'rgba(255, 192, 203, 0.15)',
-    borderRadius: 20,
-    padding: 20,
+  topBar: {
     marginBottom: 20,
-    shadowColor: '#ff69b4',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 5 },
-    shadowRadius: 10,
+  },
+  cardWhite: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#e0e0e0',
     shadowColor: '#000',
@@ -74,4 +57,7 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     color: '#333',
   },
+  row: { flexDirection: 'row', alignItems: 'center' },
+  rowText: { fontSize: 16, color: '#333', flex: 1 },
+  // Drawer-related styles moved into DrawerLayout
 });
