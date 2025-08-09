@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   StyleSheet,
   Text,
@@ -13,42 +14,44 @@ import { useAuth } from '../components/AuthProvider';
 import { db } from '../lib/firebaseConfig';
 
 export default function ConnectionCode() {
-  const { connectionCode, qrCodeData } = useLocalSearchParams<{
-    connectionCode: string;
-    qrCodeData: string;
+  const routeParams = useLocalSearchParams<{
+    connectionCode?: string;
+    qrCodeData?: string;
   }>();
-
   const { user } = useAuth();
-  const [qrValue, setQrValue] = useState('');
-  const [resolvedCode, setResolvedCode] = useState<string | undefined>(undefined);
+
+  const [loading, setLoading] = useState(false);
+  const [code, setCode] = useState<string | null>(routeParams.connectionCode || null);
+  const [qr, setQr] = useState<string | null>(routeParams.qrCodeData || null);
+  const [role, setRole] = useState<string | null>(null);
 
   useEffect(() => {
-    // Priority: route param → Firestore user doc
-    const load = async () => {
-      if (connectionCode) {
-        setResolvedCode(String(connectionCode));
-        setQrValue(String(connectionCode));
-        return;
-      }
+    const maybeFetchFromDb = async () => {
+      if (code && qr) return; // already provided via params
       if (!user?.uid) return;
       try {
+        setLoading(true);
         const snap = await getDoc(doc(db, 'users', user.uid));
-        const code = snap.exists() ? (snap.data() as any)?.connectionCode : undefined;
-        if (code) {
-          setResolvedCode(String(code));
-          setQrValue(String(code));
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          setRole(data.role || null);
+          setCode(data.connectionCode || null);
+          setQr((data.qrCodeData as string) || (data.phone && data.connectionCode ? `${data.phone}:${data.connectionCode}` : null));
         }
       } catch (e) {
-        console.warn('Failed to fetch connection code', e);
+        console.log('Failed to fetch connection data', e);
+      } finally {
+        setLoading(false);
       }
     };
-    load();
-  }, [connectionCode, user?.uid]);
+    maybeFetchFromDb();
+  }, [user?.uid]);
 
   const handleContinue = () => {
+    if (!code) return;
     Alert.alert(
       'Connection Code',
-      `Your connection code is: ${resolvedCode || connectionCode || ''}`,
+      `Your connection code is: ${code}`,
       [
         {
           text: 'Copy Code',
@@ -64,31 +67,44 @@ export default function ConnectionCode() {
     );
   };
 
-  return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Connection Code</Text>
-      
+  const renderBody = () => {
+    if (loading) {
+      return <ActivityIndicator color="#cc2b5e" />;
+    }
+    if (!code) {
+      return (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Connection</Text>
+          <Text style={styles.cardContent}>
+            {role !== 'family'
+              ? 'Only family members have a connection code.'
+              : 'No connection code found. Please complete your profile setup.'}
+          </Text>
+        </View>
+      );
+    }
+    return (
       <View style={styles.card}>
         <View style={styles.codeContainer}>
           <Text style={styles.codeLabel}>Your Connection Code:</Text>
-          <Text style={styles.code}>{resolvedCode || connectionCode}</Text>
+          <Text style={styles.code}>{code}</Text>
         </View>
-
         <View style={styles.qrContainer}>
           <View style={styles.qrWrapper}>
-            <QRCode
-              value={qrValue || resolvedCode || connectionCode || 'DEFAULT'}
-              size={200}
-              color="#cc2b5e"
-              backgroundColor="white"
-            />
+            <QRCode value={code} size={200} color="#cc2b5e" backgroundColor="white" />
           </View>
         </View>
-
         <TouchableOpacity style={styles.button} onPress={handleContinue}>
           <Text style={styles.buttonText}>Continue to Dashboard</Text>
         </TouchableOpacity>
       </View>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Connection Code</Text>
+      {renderBody()}
     </View>
   );
 }
@@ -119,6 +135,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 10,
     alignItems: 'center',
+  },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#d63384',
+    marginBottom: 10,
+  },
+  cardContent: {
+    fontSize: 16,
+    lineHeight: 22,
+    color: '#333',
+    textAlign: 'center',
   },
   codeContainer: {
     alignItems: 'center',
