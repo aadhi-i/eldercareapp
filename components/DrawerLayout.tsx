@@ -125,10 +125,7 @@ export default function DrawerLayout({ children, menuTitle = 'Menu' }: DrawerLay
             <Text style={styles.menuItemText}>Settings</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => navigateTo('/userProfile')}>
-            <Ionicons name="person-circle-outline" size={22} color="#d63384" />
-            <Text style={styles.menuItemText}>User Profile</Text>
-          </TouchableOpacity>
+          {/* User Profile option removed as requested */}
 
           <View style={{ flex: 1 }} />
 
@@ -202,7 +199,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   menuItemText: {
-    fontSize: 16,
+    fontSize: 18,
+    fontWeight: 'bold',
     color: '#333',
   },
   logoutItem: {

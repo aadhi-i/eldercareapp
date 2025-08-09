@@ -1,17 +1,19 @@
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import DrawerLayout from '../components/DrawerLayout';
+import { useRouter } from 'expo-router';
+import React, { useEffect } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 export default function UserProfileScreen() {
+  const router = useRouter();
+  
+  useEffect(() => {
+    // Redirect to settings screen with profile tab active
+    router.replace('/settings');
+  }, []);
+
   return (
-    <DrawerLayout>
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.section}>
-          <Text style={styles.title}>User Profile</Text>
-          <Text style={styles.text}>Coming soon: Edit profile, contact details, and caregiver info.</Text>
-        </View>
-      </ScrollView>
-    </DrawerLayout>
+    <View style={styles.container}>
+      <ActivityIndicator size="large" color="#d63384" />
+    </View>
   );
 }
 
