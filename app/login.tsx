@@ -53,7 +53,7 @@ export default function LoginScreen() {
 
         <View style={styles.cardWrapper}>
           <View style={styles.card}>
-            <Text style={styles.loginHeading}>Login</Text>
+            {/* Removed in-screen Login heading */}
 
             <View style={styles.phoneInputWrapper}>
               <CountryPicker
@@ -134,12 +134,7 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 5,
   },
-  loginHeading: {
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 25,
-    marginBottom: 20,
-  },
+  // Removed loginHeading style as heading is no longer shown
   phoneInputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',

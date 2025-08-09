@@ -78,8 +78,7 @@ export default function VerifyOTP() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Verify OTP</Text>
-      <Text style={styles.subHeading}>Enter 6-digit OTP sent to {phoneNumber}</Text>
+      {/* Removed in-screen headings for a cleaner auth flow */}
 
       <View style={styles.otpContainer}>
         {otp.map((digit, index) => (
@@ -109,17 +108,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingBottom : 400,
   },
-  heading: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  subHeading: {
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 30,
-  },
+  // Removed heading and subHeading styles
   otpContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',

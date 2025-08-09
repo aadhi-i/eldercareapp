@@ -22,15 +22,24 @@ export default function RootLayout() {
           }}
         />
 
-        {/* Tab layout screen with ElderCare header */}
+        {/* Signup screen without header/back button */}
         <Stack.Screen
-          name="(tabs)"
+          name="signup"
           options={{
-            headerShown: true,
-            title: 'ElderCare',
-            headerTitleAlign: 'center',
+            headerShown: false,
           }}
         />
+
+        {/* Auth/Onboarding screens without headers/back buttons */}
+        <Stack.Screen name="verify-otp" options={{ headerShown: false }} />
+        <Stack.Screen name="setupProfile" options={{ headerShown: false }} />
+
+        {/* App screens without headers (custom in-screen headers/drawers) */}
+        <Stack.Screen name="dashboard" options={{ headerShown: false }} />
+        <Stack.Screen name="medication" options={{ headerShown: false }} />
+        <Stack.Screen name="dailyRoutines" options={{ headerShown: false }} />
+        <Stack.Screen name="settings" options={{ headerShown: false }} />
+        <Stack.Screen name="userProfile" options={{ headerShown: false }} />
 
         {/* Not found fallback screen */}
         <Stack.Screen

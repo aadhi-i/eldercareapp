@@ -1,7 +1,14 @@
 import { Picker } from '@react-native-picker/picker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 export default function SetupProfile() {
   const router = useRouter();
@@ -14,16 +21,19 @@ export default function SetupProfile() {
       return;
     }
 
-    // Save to local/global state or Firebase as needed
+    // You could save this to Firebase or AsyncStorage here
     console.log('Setup complete:', { name, role });
 
-    // Navigate to the home/dashboard
-    //router.replace('/home');
+    if (role === 'family') {
+      router.replace('/dashboard'); // Navigates to family dashboard
+    } else {
+      router.replace('/caretaker'); // Navigates to caretaker screen
+    }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Set Up Your Profile</Text>
+      {/* Removed in-screen heading */}
 
       <View style={styles.card}>
         <Text style={styles.label}>Name</Text>
@@ -61,11 +71,7 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     alignItems: 'center',
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-  },
+  // Removed title style
   card: {
     width: '90%',
     backgroundColor: '#fff',
