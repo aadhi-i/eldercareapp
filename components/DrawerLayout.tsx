@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { PropsWithChildren, useRef, useState } from 'react';
+import { signOut } from 'firebase/auth';
+import { auth } from '../lib/firebaseConfig';
 import { Animated, Dimensions, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -44,9 +46,19 @@ export default function DrawerLayout({ children, menuTitle = 'Menu' }: DrawerLay
     router.push(path as any);
   };
 
-  const handleLogout = () => {
-    router.replace('/login' as any);
-    closeDrawer();
+  const handleLogout = async () => {
+    try {
+      // Sign out from Firebase
+      await signOut(auth);
+      // Navigate to login screen
+      router.replace('/login' as any);
+      closeDrawer();
+    } catch (error) {
+      console.error('Error signing out:', error);
+      // Still navigate to login screen even if there's an error
+      router.replace('/login' as any);
+      closeDrawer();
+    }
   };
 
   return (

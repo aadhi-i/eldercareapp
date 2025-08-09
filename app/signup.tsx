@@ -1,8 +1,9 @@
 import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { router } from 'expo-router';
 import { signInWithPhoneNumber } from 'firebase/auth';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -18,12 +19,21 @@ import CountryPicker, {
   CountryCode,
 } from 'react-native-country-picker-modal';
 import { auth, firebaseConfig } from '../lib/firebaseConfig';
+import { useAuth } from '../components/AuthProvider';
 
 export default function SignupScreen() {
+  const { user, isLoading } = useAuth();
   const [countryCode, setCountryCode] = useState<CountryCode>('IN');
   const [country, setCountry] = useState<Country | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
   const recaptchaVerifier = useRef(null);
+  
+  // Check if user is already authenticated and redirect to dashboard
+  useEffect(() => {
+    if (user && !isLoading) {
+      router.replace('/dashboard');
+    }
+  }, [user, isLoading]);
 
   const onSelect = (country: Country) => {
     setCountryCode(country.cca2);
@@ -50,6 +60,7 @@ export default function SignupScreen() {
         params: {
           phone: fullPhone,
           verificationId: confirmation.verificationId,
+          countryCode: countryCode,
         },
       });
     } catch (error: any) {
@@ -57,6 +68,16 @@ export default function SignupScreen() {
       Alert.alert('Error sending OTP', error.message);
     }
   };
+
+  // Show loading indicator while checking authentication state
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#d63384" />
+        <Text style={styles.loadingText}>Loading...</Text>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -76,7 +97,7 @@ export default function SignupScreen() {
 
         <View style={styles.cardWrapper}>
           <View style={styles.card}>
-            {/* Removed in-screen Sign Up heading as requested */}
+            <Text style={styles.signupHeading}>Create Account</Text>
 
             <View style={styles.phoneInputWrapper}>
               <CountryPicker
@@ -88,9 +109,7 @@ export default function SignupScreen() {
                 onSelect={onSelect}
                 containerButtonStyle={styles.countryPicker}
               />
-              <Text style={styles.callingCode}>
-                +{country?.callingCode?.[0] || '91'}
-              </Text>
+              <Text style={styles.callingCode}>+{country?.callingCode?.[0] || '91'}</Text>
               <TextInput
                 placeholder="Enter your phone number"
                 keyboardType="phone-pad"
@@ -125,14 +144,25 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f2f2f2',
-    paddingHorizontal: 24,
-    paddingTop: 100,
+    backgroundColor: '#ffe6f0',
+    paddingHorizontal: 20,
+    paddingTop: 40,
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#d63384',
   },
   title: {
     fontSize: 26,
+    fontWeight: 'bold',
     marginBottom: 20,
     textAlign: 'center',
+    color: '#cc2b5e',
   },
   cardWrapper: {
     flex: 1,
@@ -140,24 +170,32 @@ const styles = StyleSheet.create({
     marginTop: -270,
   },
   card: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
+    padding: 24,
+    borderRadius: 20,
+    shadowColor: '#cc2b5e',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
   },
-  // Removed loginHeading style as heading is no longer shown
+  signupHeading: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#cc2b5e',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
   phoneInputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
+    borderColor: '#f5b4c6',
+    borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 4,
     marginBottom: 20,
+    backgroundColor: '#fff',
   },
   countryPicker: {
     marginRight: 8,
@@ -165,6 +203,7 @@ const styles = StyleSheet.create({
   callingCode: {
     fontSize: 16,
     marginRight: 4,
+    color: '#cc2b5e',
   },
   phoneInput: {
     flex: 1,
@@ -172,9 +211,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   loginButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#cc2b5e',
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
   },
   loginText: {
@@ -192,7 +231,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
   signupLink: {
-    color: '#007AFF',
+    color: '#cc2b5e',
     fontWeight: '600',
   },
 });

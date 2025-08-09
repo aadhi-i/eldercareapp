@@ -1,6 +1,9 @@
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { signInWithPhoneNumber } from 'firebase/auth';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -15,32 +18,66 @@ import CountryPicker, {
   Country,
   CountryCode,
 } from 'react-native-country-picker-modal';
+import { auth, firebaseConfig } from '../lib/firebaseConfig';
+import { useAuth } from '../components/AuthProvider';
 
 export default function LoginScreen() {
+  const { user, isLoading } = useAuth();
   const [countryCode, setCountryCode] = useState<CountryCode>('IN');
   const [country, setCountry] = useState<Country | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
+  const recaptchaVerifier = useRef(null);
+  
+  // Check if user is already authenticated and redirect to dashboard
+  useEffect(() => {
+    if (user && !isLoading) {
+      router.replace('/dashboard');
+    }
+  }, [user, isLoading]);
 
   const onSelect = (country: Country) => {
     setCountryCode(country.cca2);
     setCountry(country);
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!phoneNumber.trim()) {
       Alert.alert('Please enter a valid phone number');
       return;
     }
+
     const fullPhone = `+${country?.callingCode?.[0] || '91'}${phoneNumber}`;
-    Alert.alert('Login', `Logging in with ${fullPhone}`);
-    // Navigate to OTP screen after this
-    router.push({
-      pathname: '/verify-otp',
-      params: {
-        phone: fullPhone,
-      },
-    });
+
+    try {
+      const confirmation = await signInWithPhoneNumber(
+        auth,
+        fullPhone,
+        recaptchaVerifier.current!
+      );
+
+      router.push({
+        pathname: '/verify-otp',
+        params: {
+          phone: fullPhone,
+          verificationId: confirmation.verificationId,
+          countryCode: countryCode,
+        },
+      });
+    } catch (error: any) {
+      console.error('OTP send error:', error);
+      Alert.alert('Error sending OTP', error.message);
+    }
   };
+
+  // Show loading indicator while checking authentication state
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#d63384" />
+        <Text style={styles.loadingText}>Loading...</Text>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -48,13 +85,19 @@ export default function LoginScreen() {
       behavior={Platform.select({ ios: 'padding', android: undefined })}
     >
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        <FirebaseRecaptchaVerifierModal
+          ref={recaptchaVerifier}
+          firebaseConfig={firebaseConfig}
+          attemptInvisibleVerification
+        />
+
         <Text style={styles.title}>
           <Text style={{ fontWeight: 'bold' }}>ElderCare</Text>
         </Text>
 
         <View style={styles.cardWrapper}>
           <View style={styles.card}>
-            {/* Removed in-screen Login heading */}
+            <Text style={styles.loginHeading}>Login</Text>
 
             <View style={styles.phoneInputWrapper}>
               <CountryPicker
@@ -79,6 +122,16 @@ export default function LoginScreen() {
             <TouchableOpacity style={styles.loginButton} onPress={handleContinue}>
               <Text style={styles.loginText}>Continue</Text>
             </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity style={styles.connectButton} onPress={() => router.push('/connectAccount')}>
+              <Text style={styles.connectButtonText}>🔗 Connect Account</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -101,14 +154,25 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f2f2f2',
+    backgroundColor: '#ffe6f0',
     paddingHorizontal: 24,
     paddingTop: 100,
   },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
   title: {
     fontSize: 26,
+    fontWeight: 'bold',
     marginBottom: 20,
     textAlign: 'center',
+    color: '#cc2b5e',
   },
   cardWrapper: {
     flex: 1,
@@ -116,24 +180,32 @@ const styles = StyleSheet.create({
     marginTop: -270,
   },
   card: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
+    padding: 24,
+    borderRadius: 20,
+    shadowColor: '#cc2b5e',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
   },
-  // Removed loginHeading style as heading is no longer shown
+  loginHeading: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#cc2b5e',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
   phoneInputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
+    borderColor: '#f5b4c6',
+    borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 4,
     marginBottom: 20,
+    backgroundColor: '#fff',
   },
   countryPicker: {
     marginRight: 8,
@@ -141,6 +213,7 @@ const styles = StyleSheet.create({
   callingCode: {
     fontSize: 16,
     marginRight: 4,
+    color: '#cc2b5e',
   },
   phoneInput: {
     flex: 1,
@@ -148,13 +221,42 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   loginButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#cc2b5e',
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
   },
   loginText: {
     color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#f5b4c6',
+  },
+  dividerText: {
+    marginHorizontal: 15,
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  connectButton: {
+    backgroundColor: '#f5b4c6',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#cc2b5e',
+  },
+  connectButtonText: {
+    color: '#cc2b5e',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -168,7 +270,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
   signupLink: {
-    color: '#007AFF',
+    color: '#cc2b5e',
     fontWeight: '600',
   },
 });

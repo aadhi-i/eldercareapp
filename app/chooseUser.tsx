@@ -1,5 +1,5 @@
 import { Picker } from '@react-native-picker/picker';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
   Alert,
@@ -10,10 +10,18 @@ import {
   View,
 } from 'react-native';
 
-export default function SetupProfile() {
+export default function ChooseUser() {
   const router = useRouter();
+  const { uid, phone, countryCode, connectionCode, isConnecting } = useLocalSearchParams<{
+    uid?: string;
+    phone?: string;
+    countryCode?: string;
+    connectionCode?: string;
+    isConnecting?: string;
+  }>();
+  
   const [name, setName] = useState('');
-  const [role, setRole] = useState('family');
+  const [role, setRole] = useState('elder');
 
   const handleContinue = () => {
     if (!name.trim()) {
@@ -21,23 +29,42 @@ export default function SetupProfile() {
       return;
     }
 
-    // You could save this to Firebase or AsyncStorage here
-    console.log('Setup complete:', { name, role });
-
-
-    if (role === 'family') {
-      router.replace('/dashboard'); // Navigates to family dashboard
+    if (isConnecting === 'true' && connectionCode) {
+      // Connecting to existing account - navigate to profile setup with connection code
+      router.push({
+        pathname: '/setupProfile',
+        params: {
+          connectionCode: connectionCode,
+          role: role,
+          name: name,
+          isConnecting: 'true',
+        },
+      });
+    } else if (uid && phone && countryCode) {
+      // New user registration - navigate to profile setup
+      router.push({
+        pathname: '/setupProfile',
+        params: {
+          uid: uid,
+          phone: phone,
+          countryCode: countryCode,
+          role: role,
+          name: name,
+        },
+      });
     } else {
-      router.replace('/caretaker'); // Navigates to caretaker screen
+      Alert.alert('Error', 'Missing required parameters');
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Choose User</Text>
+      <Text style={styles.title}>
+        {isConnecting === 'true' ? 'Connect Account' : 'Setup Account'}
+      </Text>
 
       <View style={styles.card}>
-        <Text style={styles.label}>Name</Text>
+        <Text style={styles.label}>Full Name</Text>
         <TextInput
           style={styles.input}
           placeholder="Enter your full name"
@@ -53,14 +80,18 @@ export default function SetupProfile() {
             onValueChange={(value) => setRole(value)}
             style={styles.picker}
           >
-            <Picker.Item label="Family Member" value="family" />
-            <Picker.Item label="Caretaker" value="caretaker" />
-            <Picker.Item label="Elderly User" value="elderly" />
+            <Picker.Item label="Elder" value="elder" />
+            <Picker.Item label="Caregiver" value="caregiver" />
+            {isConnecting !== 'true' && (
+              <Picker.Item label="Family Member" value="family" />
+            )}
           </Picker>
         </View>
 
         <TouchableOpacity style={styles.button} onPress={handleContinue}>
-          <Text style={styles.buttonText}>Continue</Text>
+          <Text style={styles.buttonText}>
+            {isConnecting === 'true' ? 'Connect' : 'Continue'}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>

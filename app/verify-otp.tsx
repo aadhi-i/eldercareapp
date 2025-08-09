@@ -1,5 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth, PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -7,13 +8,15 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
+import { db } from '../lib/firebaseConfig';
 
 export default function VerifyOTP() {
-  const { verificationId, phoneNumber } = useLocalSearchParams<{
+  const { verificationId, phone, countryCode } = useLocalSearchParams<{
     verificationId: string;
-    phoneNumber: string;
+    phone: string;
+    countryCode: string;
   }>();
 
   const router = useRouter();
@@ -45,6 +48,56 @@ export default function VerifyOTP() {
     }
   };
 
+  const handleUserAccount = async (uid: string) => {
+    try {
+      // Check if user already exists in Firestore
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('phone', '==', phone));
+      const querySnapshot = await getDocs(q);
+
+      if (!querySnapshot.empty) {
+        // User already exists, log them in
+        console.log('Existing user found, logging in...');
+        
+        // Check if this is an elderly user's phone number
+        const userData = querySnapshot.docs[0].data();
+        
+        if (userData.role === 'elder') {
+          // This is an elderly user, redirect to their dashboard
+          console.log('Elderly user found, redirecting to dashboard...');
+          router.replace('/dashboard');
+          return;
+        } else if (userData.role === 'family') {
+          // This is a family member, check if they have connected elderly accounts
+          console.log('Family member found, redirecting to dashboard...');
+          router.replace('/dashboard');
+          return;
+        }
+        
+        // For other roles, just redirect to dashboard
+        router.replace('/dashboard');
+        return;
+      }
+
+      // New user - navigate to choose user type first
+      console.log('New user, navigating to choose user type...');
+      router.push({
+        pathname: '/chooseUser',
+        params: {
+          uid: uid,
+          phone: phone,
+          countryCode: countryCode,
+        },
+      });
+    } catch (error: any) {
+      console.error('Error handling user account:', error);
+      Alert.alert(
+        'Account Error',
+        'Failed to verify your account. Please try again.'
+      );
+    }
+  };
+
   const verifyOtp = async (code: string) => {
     if (!verificationId || !code) {
       Alert.alert('Error', 'Missing verification ID or OTP');
@@ -55,9 +108,10 @@ export default function VerifyOTP() {
     try {
       const credential = PhoneAuthProvider.credential(verificationId, code);
       const auth = getAuth();
-      await signInWithCredential(auth, credential);
-
-      router.replace('/chooseUser');
+      const userCredential = await signInWithCredential(auth, credential);
+      
+      // Handle user account creation/login
+      await handleUserAccount(userCredential.user.uid);
     } catch (err: any) {
       console.error('OTP verification error:', err);
 
@@ -78,13 +132,16 @@ export default function VerifyOTP() {
 
   return (
     <View style={styles.container}>
-      {/* Removed in-screen headings for a cleaner auth flow */}
+      <Text style={styles.title}>Verify OTP</Text>
+      <Text style={styles.subtitle}>Enter 6-digit code</Text>
 
       <View style={styles.otpContainer}>
         {otp.map((digit, index) => (
           <TextInput
             key={index}
-            ref={(ref) => (inputsRef.current[index] = ref)}
+            ref={(ref) => {
+              inputsRef.current[index] = ref;
+            }}
             style={styles.otpBox}
             keyboardType="number-pad"
             maxLength={1}
@@ -105,10 +162,22 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 20,
-    backgroundColor: '#fff',
-    paddingBottom : 400,
+    backgroundColor: '#ffe6f0',
+    paddingBottom: 400,
   },
-  // Removed heading and subHeading styles
+  title: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#cc2b5e',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 30,
+  },
   otpContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -116,11 +185,12 @@ const styles = StyleSheet.create({
   },
   otpBox: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
+    borderColor: '#f5b4c6',
+    borderRadius: 10,
     padding: 12,
     fontSize: 18,
     width: 50,
     textAlign: 'center',
+    backgroundColor: '#fff',
   },
 });
