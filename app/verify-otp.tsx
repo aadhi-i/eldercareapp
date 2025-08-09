@@ -79,7 +79,19 @@ export default function VerifyOTP() {
         return;
       }
 
-      // New user - navigate to choose user type first
+      // Check if this is an elderly account login attempt
+      const elderlyRef = collection(db, 'users');
+      const elderlyQuery = query(elderlyRef, where('phone', '==', phone), where('role', '==', 'elder'));
+      const elderlySnapshot = await getDocs(elderlyQuery);
+      
+      if (!elderlySnapshot.empty) {
+        // This is an elderly account login, skip chooseUser and go directly to dashboard
+        console.log('Elderly account detected, redirecting to dashboard...');
+        router.replace('/dashboard');
+        return;
+      }
+      
+      // For new non-elderly users - navigate to choose user type
       console.log('New user, navigating to choose user type...');
       router.push({
         pathname: '/chooseUser',
