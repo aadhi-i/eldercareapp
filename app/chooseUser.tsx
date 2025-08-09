@@ -2,26 +2,27 @@ import { Picker } from '@react-native-picker/picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  Alert,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 export default function ChooseUser() {
   const router = useRouter();
-  const { uid, phone, countryCode, connectionCode, isConnecting } = useLocalSearchParams<{
+  const { uid, phone, countryCode, connectionCode, isConnecting, defaultRole } = useLocalSearchParams<{
     uid?: string;
     phone?: string;
     countryCode?: string;
     connectionCode?: string;
     isConnecting?: string;
+    defaultRole?: string;
   }>();
   
   const [name, setName] = useState('');
-  const [role, setRole] = useState('elder');
+  const [role, setRole] = useState(defaultRole || 'family');
 
   const handleContinue = () => {
     if (!name.trim()) {
@@ -41,17 +42,31 @@ export default function ChooseUser() {
         },
       });
     } else if (uid && phone && countryCode) {
-      // New user registration - navigate to profile setup
-      router.push({
-        pathname: '/setupProfile',
-        params: {
-          uid: uid,
-          phone: phone,
-          countryCode: countryCode,
-          role: role,
-          name: name,
-        },
-      });
+      // New user registration - navigate to appropriate profile setup
+      if (role === 'family') {
+        // Navigate to family-specific profile setup
+        router.push({
+          pathname: '/setupProfileFamily',
+          params: {
+            uid: uid,
+            phone: phone,
+            countryCode: countryCode,
+            name: name,
+          },
+        });
+      } else {
+        // Navigate to regular profile setup for elders/caregivers
+        router.push({
+          pathname: '/setupProfile',
+          params: {
+            uid: uid,
+            phone: phone,
+            countryCode: countryCode,
+            role: role,
+            name: name,
+          },
+        });
+      }
     } else {
       Alert.alert('Error', 'Missing required parameters');
     }

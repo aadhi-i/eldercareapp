@@ -41,9 +41,10 @@ export default function DrawerLayout({ children, menuTitle = 'Menu' }: DrawerLay
     else openDrawer();
   };
 
-  const navigateTo = (path: string) => {
+  const navigateTo = (path: string, params?: Record<string, string>) => {
     closeDrawer();
-    router.push(path as any);
+    if (params) router.push({ pathname: path as any, params } as any);
+    else router.push(path as any);
   };
 
   const handleLogout = async () => {
@@ -109,11 +110,18 @@ export default function DrawerLayout({ children, menuTitle = 'Menu' }: DrawerLay
             <Text style={styles.drawerHeaderText}>{menuTitle}</Text>
           </View>
 
-          {/* Menu items */}
+          {/* New: Dashboard and Connection entries */}
           <TouchableOpacity style={styles.menuItem} onPress={() => navigateTo('/dashboard')}>
-            <Ionicons name="grid-outline" size={22} color="#d63384" />
+            <Ionicons name="home-outline" size={22} color="#d63384" />
             <Text style={styles.menuItemText}>Dashboard</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => navigateTo('/connectionCode')}>
+            <Ionicons name="qr-code-outline" size={22} color="#d63384" />
+            <Text style={styles.menuItemText}>Connection</Text>
+          </TouchableOpacity>
+
+          {/* Existing items */}
 
           <TouchableOpacity style={styles.menuItem} onPress={() => navigateTo('/medication')}>
             <Ionicons name="medical-outline" size={22} color="#d63384" />
@@ -134,8 +142,6 @@ export default function DrawerLayout({ children, menuTitle = 'Menu' }: DrawerLay
             <Ionicons name="settings-outline" size={22} color="#d63384" />
             <Text style={styles.menuItemText}>Settings</Text>
           </TouchableOpacity>
-
-          {/* User Profile option removed as requested */}
 
           <View style={{ flex: 1 }} />
 

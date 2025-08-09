@@ -18,8 +18,8 @@ import CountryPicker, {
   Country,
   CountryCode,
 } from 'react-native-country-picker-modal';
-import { auth, firebaseConfig } from '../lib/firebaseConfig';
 import { useAuth } from '../components/AuthProvider';
+import { auth, firebaseConfig } from '../lib/firebaseConfig';
 
 export default function SignupScreen() {
   const { user, isLoading } = useAuth();
@@ -56,7 +56,7 @@ export default function SignupScreen() {
       );
 
       router.push({
-        pathname: '/verify-otp',
+        pathname: '/verify-otp-family',
         params: {
           phone: fullPhone,
           verificationId: confirmation.verificationId,

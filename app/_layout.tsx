@@ -35,7 +35,11 @@ export default function RootLayout() {
 
           {/* Auth/Onboarding screens without headers/back buttons */}
           <Stack.Screen name="verify-otp" options={{ headerShown: false }} />
+          <Stack.Screen name="verify-otp-family" options={{ headerShown: false }} />
+          <Stack.Screen name="chooseUser" options={{ headerShown: false }} />
           <Stack.Screen name="setupProfile" options={{ headerShown: false }} />
+          <Stack.Screen name="connectionCode" options={{ headerShown: false }} />
+          <Stack.Screen name="connectAccount" options={{ headerShown: false }} />
 
           {/* App screens without headers (custom in-screen headers/drawers) */}
           <Stack.Screen name="dashboard" options={{ headerShown: false }} />

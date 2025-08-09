@@ -3,16 +3,16 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { collection, doc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { db } from '../lib/firebaseConfig';
 
@@ -172,6 +172,14 @@ export default function SetupProfile() {
     }
     if (role !== 'family' && !formData.emergencyContact.trim()) {
       Alert.alert('Error', 'Please enter an emergency contact');
+      return false;
+    }
+    if (role === 'family' && !formData.address.trim()) {
+      Alert.alert('Error', 'Please enter your address');
+      return false;
+    }
+    if (role === 'family' && !formData.age.trim()) {
+      Alert.alert('Error', 'Please enter your age');
       return false;
     }
     // Validate phone number format
@@ -389,62 +397,105 @@ export default function SetupProfile() {
                 )}
               </View>
             )}
+
+            {role === 'family' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Address *</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={formData.address}
+                  onChangeText={(value) => handleInputChange('address', value)}
+                  placeholder="Enter your address"
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+                <Text style={styles.helperText}>
+                  This address will be used for emergency situations
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Optional Fields */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Additional Information (Optional)</Text>
             
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Age</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.age}
-                onChangeText={(value) => handleInputChange('age', value)}
-                placeholder="Enter your age"
-                keyboardType="numeric"
-                maxLength={3}
-              />
-            </View>
+            {role === 'family' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Age *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.age}
+                  onChangeText={(value) => handleInputChange('age', value)}
+                  placeholder="Enter your age"
+                  keyboardType="numeric"
+                  maxLength={3}
+                />
+                <Text style={styles.helperText}>
+                  Required for family members to ensure appropriate care coordination
+                </Text>
+              </View>
+            )}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Address</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={formData.address}
-                onChangeText={(value) => handleInputChange('address', value)}
-                placeholder="Enter your address"
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-            </View>
+            {role !== 'family' && (
+              <>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Age</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.age}
+                    onChangeText={(value) => handleInputChange('age', value)}
+                    placeholder="Enter your age"
+                    keyboardType="numeric"
+                    maxLength={3}
+                  />
+                </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Current Health Status</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={formData.healthStatus}
-                onChangeText={(value) => handleInputChange('healthStatus', value)}
-                placeholder="Describe your current health status"
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-            </View>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Address</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={formData.address}
+                    onChangeText={(value) => handleInputChange('address', value)}
+                    placeholder="Enter your address"
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                  />
+                </View>
+              </>
+            )}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Illnesses/Conditions</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={formData.illnesses}
-                onChangeText={(value) => handleInputChange('illnesses', value)}
-                placeholder="List any illnesses or medical conditions"
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-            </View>
+            {role !== 'family' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Current Health Status</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={formData.healthStatus}
+                  onChangeText={(value) => handleInputChange('healthStatus', value)}
+                  placeholder="Describe your current health status"
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+              </View>
+            )}
+
+            {role !== 'family' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Illnesses/Conditions</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={formData.illnesses}
+                  onChangeText={(value) => handleInputChange('illnesses', value)}
+                  placeholder="List any illnesses or medical conditions"
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+              </View>
+            )}
           </View>
 
           {/* Medicine Management */}

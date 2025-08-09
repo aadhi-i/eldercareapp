@@ -18,11 +18,12 @@ import CountryPicker, {
   Country,
   CountryCode,
 } from 'react-native-country-picker-modal';
-import { auth, firebaseConfig } from '../lib/firebaseConfig';
 import { useAuth } from '../components/AuthProvider';
+import { auth, firebaseConfig } from '../lib/firebaseConfig';
 
 export default function LoginScreen() {
   const { user, isLoading } = useAuth();
+
   const [countryCode, setCountryCode] = useState<CountryCode>('IN');
   const [country, setCountry] = useState<Country | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
