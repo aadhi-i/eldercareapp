@@ -1,17 +1,26 @@
-import { Picker } from '@react-native-picker/picker';
-import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { addDoc, collection, deleteDoc, doc, DocumentData, getDocs, query, QueryDocumentSnapshot, where } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
+  Animated,
   FlatList,
+  LayoutAnimation,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  UIManager,
   View,
 } from 'react-native';
+import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
+import { useAuth } from '../components/AuthProvider';
 import DrawerLayout from '../components/DrawerLayout';
+import { db } from '../lib/firebaseConfig';
 
 interface MedicationTime {
   id: string;
@@ -30,6 +39,7 @@ interface Medication {
 
 export default function MedicationScreen() {
   const [medications, setMedications] = useState<Medication[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
   const [currentMedication, setCurrentMedication] = useState<Partial<Medication>>({
@@ -38,27 +48,89 @@ export default function MedicationScreen() {
     instructions: '',
     times: [],
   });
-  const [selectedHour, setSelectedHour] = useState(9);
-  const [selectedMinute, setSelectedMinute] = useState(0);
-  const [selectedPeriod, setSelectedPeriod] = useState<'AM' | 'PM'>('AM');
+  const [timePickerDate, setTimePickerDate] = useState<Date>(() => {
+    const d = new Date();
+    d.setHours(9);
+    d.setMinutes(0);
+    return d;
+  });
 
-  const hours = Array.from({ length: 12 }, (_, i) => i + 1);
-  const minutes = Array.from({ length: 60 }, (_, i) => i);
+  // Time wheel/clock uses native DateTimePicker
 
-  const addTime = () => {
+  // Current authenticated user
+  const { user } = useAuth();
+
+  // Enable smooth removal animations on Android
+  if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
+
+  useEffect(() => {
+    let isMounted = true;
+    // Fetch user's medicines from Firestore (root collection 'medicines' filtered by UID)
+    const loadMedications = async () => {
+      if (!user) {
+        setMedications([]);
+        return;
+      }
+      try {
+        setIsLoading(true);
+        const medicinesRef = collection(db, 'medicines');
+        const q = query(medicinesRef, where('uid', '==', user.uid));
+        const snapshot = await getDocs(q);
+        const items: Medication[] = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
+          const data = d.data() as any;
+          const times: MedicationTime[] = Array.isArray(data?.times)
+            ? data.times.map((t: any, idx: number) => ({
+                id: t?.id ?? `${d.id}-t${idx}`,
+                hour: Number(t?.hour ?? 0),
+                minute: Number(t?.minute ?? 0),
+                period: (t?.period === 'PM' ? 'PM' : 'AM') as 'AM' | 'PM',
+              }))
+            : [];
+          return {
+            id: d.id,
+            name: String(data?.name ?? ''),
+            dosage: String(data?.dosage ?? ''),
+            instructions: String(data?.instructions ?? ''),
+            times,
+          } as Medication;
+        });
+        if (isMounted) setMedications(items);
+      } catch (e) {
+        console.error('Failed to load medications', e);
+        if (isMounted) setMedications([]);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+    loadMedications();
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  // Helper to add time from a Date object
+  const addTimeFromDate = (date: Date) => {
+    const hours24 = date.getHours();
+    const minutes = date.getMinutes();
+    const period: 'AM' | 'PM' = hours24 >= 12 ? 'PM' : 'AM';
+    const hour12 = ((hours24 + 11) % 12) + 1;
     const newTime: MedicationTime = {
       id: Date.now().toString(),
-      hour: selectedHour,
-      minute: selectedMinute,
-      period: selectedPeriod,
+      hour: hour12,
+      minute: minutes,
+      period,
     };
-
     setCurrentMedication(prev => ({
       ...prev,
       times: [...(prev.times || []), newTime],
     }));
     setShowTimeModal(false);
   };
+
+  // Add a time entry using the currently selected date (for iOS Add Time button)
+  const addTime = () => addTimeFromDate(timePickerDate);
 
   const removeTime = (timeId: string) => {
     setCurrentMedication(prev => ({
@@ -67,40 +139,61 @@ export default function MedicationScreen() {
     }));
   };
 
-  const saveMedication = () => {
+  // Persist a new medicine document in Firestore and optimistically update UI
+  const saveMedication = async () => {
     if (!currentMedication.name || !currentMedication.dosage || !currentMedication.times?.length) {
       Alert.alert('Error', 'Please fill in all required fields and add at least one time.');
       return;
     }
+    if (!user) {
+      Alert.alert('Not signed in', 'Please log in to save medications.');
+      return;
+    }
 
-    const newMedication: Medication = {
-      id: Date.now().toString(),
-      name: currentMedication.name!,
-      dosage: currentMedication.dosage!,
-      instructions: currentMedication.instructions || '',
-      times: currentMedication.times!,
-    };
+    try {
+      const payload = {
+        uid: user.uid,
+        name: currentMedication.name,
+        dosage: currentMedication.dosage,
+        instructions: currentMedication.instructions ?? '',
+        // Store times as array of objects; keep ids for client-side list rendering
+        times: (currentMedication.times || []).map(t => ({ id: t.id, hour: t.hour, minute: t.minute, period: t.period })),
+        createdAt: Date.now(),
+      };
+      const ref = await addDoc(collection(db, 'medicines'), payload);
 
-    setMedications(prev => [...prev, newMedication]);
-    setCurrentMedication({ name: '', dosage: '', instructions: '', times: [] });
-    setShowAddModal(false);
+      // Optimistically add to local list with Firestore-generated id
+      const newMedication: Medication = {
+        id: ref.id,
+        name: payload.name!,
+        dosage: payload.dosage!,
+        instructions: payload.instructions!,
+        times: payload.times as MedicationTime[],
+      };
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setMedications(prev => [...prev, newMedication]);
+
+      // Reset form
+      setCurrentMedication({ name: '', dosage: '', instructions: '', times: [] });
+      setShowAddModal(false);
+    } catch (e) {
+      console.error('Failed to save medication', e);
+      Alert.alert('Error', 'Failed to save medication. Please try again.');
+    }
   };
 
-  const deleteMedication = (medicationId: string) => {
-    Alert.alert(
-      'Delete Medication',
-      'Are you sure you want to delete this medication?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            setMedications(prev => prev.filter(med => med.id !== medicationId));
-          },
-        },
-      ]
-    );
+  const handleSwipeDelete = async (medicationId: string) => {
+    // Optimistic update with smooth layout animation
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setMedications(prev => prev.filter(med => med.id !== medicationId));
+    try {
+      if (user) {
+        // Delete from root 'medicines' collection
+        await deleteDoc(doc(db, 'medicines', medicationId));
+      }
+    } catch (e) {
+      console.error('Failed to delete medication', e);
+    }
   };
 
   const formatTime = (time: MedicationTime) => {
@@ -121,9 +214,25 @@ export default function MedicationScreen() {
     </View>
   );
 
+  // Left swipe action with red background and trash icon
+  const renderLeftActions = (
+    progress: Animated.AnimatedInterpolation<string | number>,
+    dragX: Animated.AnimatedInterpolation<string | number>
+  ) => {
+    const translateX = dragX.interpolate({ inputRange: [0, 100], outputRange: [-20, 0] });
+    return (
+      <View style={styles.leftAction}>
+        <Animated.View style={{ transform: [{ translateX }] }}>
+          <Ionicons name="trash" size={24} color="#fff" />
+        </Animated.View>
+      </View>
+    );
+  };
+
   return (
     <DrawerLayout>
-      <ScrollView contentContainerStyle={styles.container}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={[styles.container, medications.length === 0 && styles.containerEmpty]}>        
         <View style={styles.header}>
           <Text style={styles.title}>Medication Management</Text>
           <TouchableOpacity
@@ -134,40 +243,46 @@ export default function MedicationScreen() {
           </TouchableOpacity>
         </View>
 
-        {medications.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>
-              No medications added yet. Tap the button above to add your first medication.
-            </Text>
+        {isLoading ? (
+          <View style={styles.emptyWrapper}>
+            <View style={styles.emptyCard}><Text style={styles.emptyCardText}>Loading...</Text></View>
+          </View>
+        ) : medications.length === 0 ? (
+          <View style={styles.emptyWrapper}>
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyCardText}>No medications added yet...</Text>
+            </View>
           </View>
         ) : (
           <View style={styles.medicationsList}>
             {medications.map(medication => (
-              <View key={medication.id} style={styles.medicationCard}>
-                <View style={styles.medicationHeader}>
-                  <Text style={styles.medicationName}>{medication.name}</Text>
-                  <TouchableOpacity
-                    onPress={() => deleteMedication(medication.id)}
-                    style={styles.deleteButton}
-                  >
-                    <Text style={styles.deleteButtonText}>×</Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.medicationDosage}>Dosage: {medication.dosage}</Text>
-                {medication.instructions && (
-                  <Text style={styles.medicationInstructions}>
-                    Instructions: {medication.instructions}
-                  </Text>
-                )}
-                <View style={styles.timesContainer}>
-                  <Text style={styles.timesLabel}>Timings:</Text>
-                  {medication.times.map(time => (
-                    <Text key={time.id} style={styles.timeDisplay}>
-                      • {formatTime(time)}
+              <Swipeable
+                key={medication.id}
+                renderLeftActions={renderLeftActions}
+                onSwipeableOpen={() => handleSwipeDelete(medication.id)}
+                overshootLeft={false}
+                friction={2}
+              >
+                <View style={styles.medicationCard}>
+                  <View style={styles.medicationHeader}>
+                    <Text style={styles.medicationName}>{medication.name}</Text>
+                  </View>
+                  <Text style={styles.medicationDosage}>Dosage: {medication.dosage}</Text>
+                  {medication.instructions && (
+                    <Text style={styles.medicationInstructions}>
+                      Instructions: {medication.instructions}
                     </Text>
-                  ))}
+                  )}
+                  <View style={styles.timesContainer}>
+                    <Text style={styles.timesLabel}>Timings:</Text>
+                    {medication.times.map(time => (
+                      <Text key={time.id} style={styles.timeDisplay}>
+                        • {formatTime(time)}
+                      </Text>
+                    ))}
+                  </View>
                 </View>
-              </View>
+              </Swipeable>
             ))}
           </View>
         )}
@@ -181,6 +296,9 @@ export default function MedicationScreen() {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
+              <TouchableOpacity style={styles.modalClose} onPress={() => setShowAddModal(false)}>
+                <Ionicons name="close" size={20} color="#333" />
+              </TouchableOpacity>
               <Text style={styles.modalTitle}>Add New Medication</Text>
               
               <TextInput
@@ -215,11 +333,8 @@ export default function MedicationScreen() {
                     style={styles.timesList}
                   />
                 )}
-                <TouchableOpacity
-                  style={styles.addTimeButton}
-                  onPress={() => setShowTimeModal(true)}
-                >
-                  <Text style={styles.addTimeButtonText}>+ Add Time</Text>
+                <TouchableOpacity style={styles.addTimeButton} onPress={() => setShowTimeModal(true)}>
+                  <Text style={styles.addTimeButtonText}>+ Add Time (Clock)</Text>
                 </TouchableOpacity>
               </View>
 
@@ -253,48 +368,26 @@ export default function MedicationScreen() {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
+              <TouchableOpacity style={styles.modalClose} onPress={() => setShowTimeModal(false)}>
+                <Ionicons name="close" size={20} color="#333" />
+              </TouchableOpacity>
               <Text style={styles.modalTitle}>Select Time</Text>
-              
-              <View style={styles.timePickerContainer}>
-                <View style={styles.pickerColumn}>
-                  <Text style={styles.pickerLabel}>Hour</Text>
-                  <Picker
-                    selectedValue={selectedHour}
-                    onValueChange={setSelectedHour}
-                    style={styles.picker}
-                  >
-                    {hours.map(hour => (
-                      <Picker.Item key={hour} label={hour.toString()} value={hour} />
-                    ))}
-                  </Picker>
-                </View>
-                
-                <View style={styles.pickerColumn}>
-                  <Text style={styles.pickerLabel}>Minute</Text>
-                  <Picker
-                    selectedValue={selectedMinute}
-                    onValueChange={setSelectedMinute}
-                    style={styles.picker}
-                  >
-                    {minutes.map(minute => (
-                      <Picker.Item key={minute} label={minute.toString().padStart(2, '0')} value={minute} />
-                    ))}
-                  </Picker>
-                </View>
-                
-                <View style={styles.pickerColumn}>
-                  <Text style={styles.pickerLabel}>Period</Text>
-                  <Picker
-                    selectedValue={selectedPeriod}
-                    onValueChange={setSelectedPeriod}
-                    style={styles.picker}
-                  >
-                    <Picker.Item label="AM" value="AM" />
-                    <Picker.Item label="PM" value="PM" />
-                  </Picker>
-                </View>
+              <View style={styles.clockPickerWrapper}>
+                <DateTimePicker
+                  value={timePickerDate}
+                  mode="time"
+                  is24Hour={false}
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(event: DateTimePickerEvent, date?: Date) => {
+                    if (event.type === 'dismissed') return;
+                    if (date) {
+                      setTimePickerDate(date);
+                      // On Android, pressing OK should add and close immediately
+                      if (Platform.OS === 'android') addTimeFromDate(date);
+                    }
+                  }}
+                />
               </View>
-
               <View style={styles.modalButtons}>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.cancelButton]}
@@ -312,7 +405,8 @@ export default function MedicationScreen() {
             </View>
           </View>
         </Modal>
-      </ScrollView>
+        </ScrollView>
+      </GestureHandlerRootView>
     </DrawerLayout>
   );
 }
@@ -320,8 +414,12 @@ export default function MedicationScreen() {
 const styles = StyleSheet.create({
   container: {
     padding: 20,
-    paddingTop: 50,
+    paddingTop: 24,
     backgroundColor: '#fff',
+    flexGrow: 1,
+  },
+  containerEmpty: {
+    justifyContent: 'center',
   },
   header: {
     flexDirection: 'row',
@@ -339,25 +437,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
+    marginTop: 6,
   },
   addButtonText: {
     color: '#fff',
     fontWeight: '600',
     fontSize: 14,
   },
-  emptyState: {
+  emptyWrapper: {
+    alignItems: 'center',
+  },
+  emptyCard: {
+    width: '100%',
     backgroundColor: 'rgba(255, 192, 203, 0.15)',
     borderRadius: 16,
-    padding: 20,
+    padding: 28,
     borderWidth: 1,
     borderColor: 'rgba(255, 192, 203, 0.3)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  emptyStateText: {
+  emptyCardText: {
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
-    lineHeight: 22,
   },
   medicationsList: {
     gap: 16,
@@ -386,19 +489,6 @@ const styles = StyleSheet.create({
     color: '#333',
     flex: 1,
   },
-  deleteButton: {
-    backgroundColor: '#ff4444',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deleteButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
   medicationDosage: {
     fontSize: 16,
     color: '#666',
@@ -423,6 +513,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginLeft: 8,
+  },
+  leftAction: {
+    justifyContent: 'center',
+    backgroundColor: '#ff4d4f',
+    borderRadius: 16,
+    marginBottom: 16,
+    paddingHorizontal: 20,
   },
   modalOverlay: {
     flex: 1,
@@ -546,4 +643,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
+  modalClose: { position: 'absolute', right: 12, top: 12, zIndex: 1 },
+  clockPickerWrapper: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
 }); 
+
+// Mock helpers removed; Firestore is the source of truth now

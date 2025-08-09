@@ -2,6 +2,7 @@ import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { AuthProvider } from '../components/AuthProvider';
 
@@ -39,6 +40,7 @@ export default function RootLayout() {
           {/* App screens without headers (custom in-screen headers/drawers) */}
           <Stack.Screen name="dashboard" options={{ headerShown: false }} />
           <Stack.Screen name="medication" options={{ headerShown: false }} />
+          <Stack.Screen name="medicinestock" options={{ headerShown: false }} />
           <Stack.Screen name="dailyRoutines" options={{ headerShown: false }} />
           <Stack.Screen name="settings" options={{ headerShown: false }} />
           <Stack.Screen name="userProfile" options={{ headerShown: false }} />
