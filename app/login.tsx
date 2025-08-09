@@ -1,5 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router'; // ✅ added import for router
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
   Alert,
@@ -32,13 +31,15 @@ export default function LoginScreen() {
       Alert.alert('Please enter a valid phone number');
       return;
     }
-    Alert.alert('Login', `Logging in with +${country?.callingCode?.[0] || '91'} ${phoneNumber}`);
-    // Navigate to verification or home screen
-  };
-
-  const handleGoogleLogin = () => {
-    Alert.alert('Google Login pressed');
-    // Trigger Google authentication logic here
+    const fullPhone = `+${country?.callingCode?.[0] || '91'}${phoneNumber}`;
+    Alert.alert('Login', `Logging in with ${fullPhone}`);
+    // Navigate to OTP screen after this
+    router.push({
+      pathname: '/verify-otp',
+      params: {
+        phone: fullPhone,
+      },
+    });
   };
 
   return (
@@ -77,17 +78,6 @@ export default function LoginScreen() {
 
             <TouchableOpacity style={styles.loginButton} onPress={handleContinue}>
               <Text style={styles.loginText}>Continue</Text>
-            </TouchableOpacity>
-
-            <View style={styles.separatorContainer}>
-              <View style={styles.separatorLine} />
-              <Text style={styles.separatorText}>OR</Text>
-              <View style={styles.separatorLine} />
-            </View>
-
-            <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin}>
-              <Ionicons name="logo-google" size={20} color="#fff" style={{ marginRight: 8 }} />
-              <Text style={styles.googleText}>Login with Google</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -164,34 +154,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loginText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  separatorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-  separatorLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#ccc',
-  },
-  separatorText: {
-    marginHorizontal: 8,
-    color: '#999',
-    fontWeight: '500',
-  },
-  googleButton: {
-    flexDirection: 'row',
-    backgroundColor: '#DB4437',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  googleText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',

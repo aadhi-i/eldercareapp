@@ -2,12 +2,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth, PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
 import { useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 export default function VerifyOTP() {
@@ -57,7 +57,7 @@ export default function VerifyOTP() {
       const auth = getAuth();
       await signInWithCredential(auth, credential);
 
-      router.replace('/setupProfile');
+      router.replace('/chooseUser');
     } catch (err: any) {
       console.error('OTP verification error:', err);
 
