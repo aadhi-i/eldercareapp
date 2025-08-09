@@ -1,7 +1,14 @@
 import { Picker } from '@react-native-picker/picker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 export default function SetupProfile() {
   const router = useRouter();
@@ -18,18 +25,19 @@ export default function SetupProfile() {
     console.log('Setup complete:', { name, role });
 
     // Navigate to the home/dashboard
-    //router.replace('/home');
+    // router.replace('/home');
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Set Up Your Profile</Text>
+      <Text style={styles.title}>Choose User</Text>
 
       <View style={styles.card}>
         <Text style={styles.label}>Name</Text>
         <TextInput
           style={styles.input}
           placeholder="Enter your full name"
+          placeholderTextColor="#aaa"
           value={name}
           onChangeText={setName}
         />
@@ -43,6 +51,7 @@ export default function SetupProfile() {
           >
             <Picker.Item label="Family Member" value="family" />
             <Picker.Item label="Caretaker" value="caretaker" />
+            <Picker.Item label="Elderly User" value="elderly" />
           </Picker>
         </View>
 
@@ -57,59 +66,66 @@ export default function SetupProfile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f2f2f2',
+    backgroundColor: '#ffe6f0',
     paddingTop: 60,
+    paddingBottom: 80,
     alignItems: 'center',
   },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: 'bold',
     marginBottom: 20,
+    color: '#cc2b5e',
   },
   card: {
     width: '90%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
+    borderRadius: 20,
+    padding: 24,
+    backdropFilter: 'blur(12px)', // works only in web
+    elevation: 10,
+    shadowColor: '#cc2b5e',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
   },
   label: {
     fontSize: 16,
     fontWeight: '600',
-    marginTop: 10,
+    marginTop: 16,
+    color: '#cc2b5e',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderColor: '#f5b4c6',
+    borderRadius: 10,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    marginTop: 5,
+    marginTop: 6,
+    fontSize: 16,
+    backgroundColor: '#fff',
   },
   pickerContainer: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    marginTop: 5,
+    borderColor: '#f5b4c6',
+    borderRadius: 10,
+    marginTop: 6,
+    backgroundColor: '#fff',
   },
   picker: {
     height: 44,
     width: '100%',
   },
   button: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#cc2b5e',
     paddingVertical: 14,
-    borderRadius: 8,
-    marginTop: 20,
+    borderRadius: 10,
+    marginTop: 30,
     alignItems: 'center',
   },
   buttonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
   },
 });
