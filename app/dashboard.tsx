@@ -573,6 +573,61 @@ export default function Dashboard() {
           </Text>
         </View>
 
+        {/* Elder Profile Information */}
+        {elderData && (
+          <View style={styles.cardWhite}>
+            <Text style={styles.cardTitle}>👤 Elder Profile</Text>
+            <View style={styles.profileSection}>
+              <View style={styles.profileRow}>
+                <Text style={styles.profileLabel}>Name:</Text>
+                <Text style={styles.profileValue}>{elderData.firstName} {elderData.lastName}</Text>
+              </View>
+              
+              {elderData.age && (
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Age:</Text>
+                  <Text style={styles.profileValue}>{elderData.age} years</Text>
+                </View>
+              )}
+              
+              {elderData.phone && (
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Phone:</Text>
+                  <Text style={styles.profileValue}>{elderData.phone}</Text>
+                </View>
+              )}
+              
+              {elderData.address && (
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Address:</Text>
+                  <Text style={styles.profileValue}>{elderData.address}</Text>
+                </View>
+              )}
+              
+              {elderData.emergencyContact && (
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Emergency Contact:</Text>
+                  <Text style={styles.profileValue}>{elderData.emergencyContact}</Text>
+                </View>
+              )}
+              
+              {elderData.healthStatus && (
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Health Status:</Text>
+                  <Text style={styles.profileValue}>{elderData.healthStatus}</Text>
+                </View>
+              )}
+              
+              {elderData.illnesses && (
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Medical Conditions:</Text>
+                  <Text style={styles.profileValue}>{elderData.illnesses}</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
         {/* 1. Upcoming Medications - Max 3 items */}
         <View style={[styles.cardWhite, styles.priorityCard]}>
           <Text style={styles.cardTitle}>⏰ Upcoming Medications</Text>
@@ -1081,6 +1136,28 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     textAlign: 'center',
+  },
+  // Profile section styles
+  profileSection: {
+    marginTop: 8,
+  },
+  profileRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    alignItems: 'flex-start',
+  },
+  profileLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    width: 140,
+    marginRight: 16,
+  },
+  profileValue: {
+    fontSize: 16,
+    color: '#555',
+    flex: 1,
+    lineHeight: 22,
   },
   // Fall detection toggle styles moved to DrawerLayout
 });

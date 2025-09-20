@@ -71,22 +71,66 @@ export default function MedicineStockScreen() {
     };
   }, [user]);
 
-  // Decrement once per day based on times per day (simple heuristic)
+  // Enhanced automatic stock decrease based on medication schedules
   useEffect(() => {
     if (!user) return;
-    const todayKey = new Date(); todayKey.setHours(0,0,0,0);
+    const todayKey = new Date(); 
+    todayKey.setHours(0, 0, 0, 0);
     const todayMs = todayKey.getTime();
-    const updates: Array<Promise<any>> = [];
+    const updates: Promise<any>[] = [];
+    
     medicines.forEach(m => {
       const current = stocks[m.id];
+      if (!current) return;
+      
+      // Skip if already decremented today
+      if (current.lastDecrementDate === todayMs) return;
+      
+      // Calculate daily consumption based on dosage and frequency
       const timesPerDay = m.times.length;
       if (!timesPerDay) return;
-      if (!current) return;
-      if (current.lastDecrementDate === todayMs) return;
-      const newQty = Math.max(0, current.quantity - timesPerDay);
-      updates.push(updateDoc(doc(db, 'medicineStocks', current.id), { quantity: newQty, lastDecrementDate: todayMs }));
+      
+      // Parse dosage to get quantity per dose (e.g., "1 tablet", "2 capsules", "5ml")
+      const dosageText = m.dosage.toLowerCase();
+      let quantityPerDose = 1; // default
+      
+      if (dosageText.includes('tablet')) {
+        const match = dosageText.match(/(\d+)\s*tablet/);
+        quantityPerDose = match ? parseInt(match[1]) : 1;
+      } else if (dosageText.includes('capsule')) {
+        const match = dosageText.match(/(\d+)\s*capsule/);
+        quantityPerDose = match ? parseInt(match[1]) : 1;
+      } else if (dosageText.includes('ml')) {
+        const match = dosageText.match(/(\d+)\s*ml/);
+        quantityPerDose = match ? parseInt(match[1]) : 1;
+      } else if (dosageText.includes('mg')) {
+        const match = dosageText.match(/(\d+)\s*mg/);
+        quantityPerDose = match ? parseInt(match[1]) : 1;
+      } else {
+        // Try to extract any number from dosage
+        const match = dosageText.match(/(\d+)/);
+        quantityPerDose = match ? parseInt(match[1]) : 1;
+      }
+      
+      // Calculate total daily consumption
+      const dailyConsumption = timesPerDay * quantityPerDose;
+      const newQty = Math.max(0, current.quantity - dailyConsumption);
+      
+      // Only update if quantity changed
+      if (newQty !== current.quantity) {
+        updates.push(updateDoc(doc(db, 'medicineStocks', current.id), { 
+          quantity: newQty, 
+          lastDecrementDate: todayMs,
+          lastDecrementAmount: dailyConsumption
+        }));
+      }
     });
-    if (updates.length) Promise.allSettled(updates).catch(() => {});
+    
+    if (updates.length) {
+      Promise.allSettled(updates).catch((error) => {
+        console.error('Error updating medicine stock:', error);
+      });
+    }
   }, [medicines, stocks, user]);
 
   const openAddStock = (medicineId: string) => {
@@ -114,17 +158,17 @@ export default function MedicineStockScreen() {
     }
   };
 
-  const lowStock = useMemo(() => {
-    return medicines
-      .map(m => ({
-        medicine: m,
-        quantity: stocks[m.id]?.quantity ?? 0,
-        daysLeft: m.times.length ? Math.floor((stocks[m.id]?.quantity ?? 0) / m.times.length) : Infinity,
-      }))
-      .filter(x => x.daysLeft <= 3)
-      .sort((a,b) => a.daysLeft - b.daysLeft)
-      .slice(0, 50);
-  }, [medicines, stocks]);
+  // const lowStock = useMemo(() => {
+  //   return medicines
+  //     .map(m => ({
+  //       medicine: m,
+  //       quantity: stocks[m.id]?.quantity ?? 0,
+  //       daysLeft: m.times.length ? Math.floor((stocks[m.id]?.quantity ?? 0) / m.times.length) : Infinity,
+  //     }))
+  //     .filter(x => x.daysLeft <= 3)
+  //     .sort((a,b) => a.daysLeft - b.daysLeft)
+  //     .slice(0, 50);
+  // }, [medicines, stocks]);
 
   const getQty = (id: string) => stocks[id]?.quantity ?? 0;
 
@@ -132,7 +176,12 @@ export default function MedicineStockScreen() {
     <DrawerLayout>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container}>
-          <Text style={styles.title}>Medicine Stock</Text>
+          <View style={styles.header}>
+            <Text style={styles.title}>Medicine Stock</Text>
+            <TouchableOpacity style={styles.addIconButton}>
+              <Ionicons name="add-circle" size={32} color="#d63384" />
+            </TouchableOpacity>
+          </View>
           {isLoading ? (
             <View style={styles.emptyCard}><Text style={styles.emptyText}>Loading...</Text></View>
           ) : medicines.length === 0 ? (
@@ -143,7 +192,14 @@ export default function MedicineStockScreen() {
                 <View key={m.id} style={styles.card}>
                   <View style={styles.cardHeader}>
                     <Text style={styles.medName}>{m.name}</Text>
-                    <Text style={styles.qtyBadge}>Qty: {getQty(m.id)}</Text>
+                    <View style={styles.stockInfo}>
+                      <Text style={styles.qtyBadge}>Qty: {getQty(m.id)}</Text>
+                      {m.times.length > 0 && (
+                        <Text style={styles.daysRemaining}>
+                          {Math.floor(getQty(m.id) / m.times.length)} days left
+                        </Text>
+                      )}
+                    </View>
                   </View>
                   <Text style={styles.medDosage}>Dosage: {m.dosage}</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
@@ -188,14 +244,18 @@ export default function MedicineStockScreen() {
 
 const styles = StyleSheet.create({
   container: { padding: 20, paddingTop: 80, backgroundColor: '#fff', flexGrow: 1 },
-  title: { fontSize: 24, fontWeight: '700', color: '#d63384', marginBottom: 12 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  title: { fontSize: 24, fontWeight: '700', color: '#d63384' },
+  addIconButton: { padding: 8, borderRadius: 20, backgroundColor: 'rgba(214, 51, 132, 0.1)' },
   emptyCard: { backgroundColor: 'rgba(255, 192, 203, 0.15)', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: 'rgba(255, 192, 203, 0.3)' },
   emptyText: { color: '#666', fontSize: 16 },
   card: { backgroundColor: '#fff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#e0e0e0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   medName: { fontSize: 18, fontWeight: '600', color: '#333' },
   medDosage: { fontSize: 14, color: '#666', marginTop: 4 },
-  qtyBadge: { backgroundColor: '#f0f0f0', color: '#333', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden' },
+  stockInfo: { alignItems: 'flex-end' },
+  qtyBadge: { backgroundColor: '#f0f0f0', color: '#333', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', fontSize: 12 },
+  daysRemaining: { fontSize: 11, color: '#666', marginTop: 2, fontStyle: 'italic' },
   timesLabel: { fontSize: 14, color: '#666' },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#d63384', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
   addBtnText: { color: '#fff', fontWeight: '600' },

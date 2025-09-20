@@ -42,7 +42,8 @@
         }
       ],
       "expo-web-browser",
-      "expo-barcode-scanner"
+      "expo-barcode-scanner",
+      "./plugins/with-android-fall-service"
     ],
     "experiments": {
       "typedRoutes": true

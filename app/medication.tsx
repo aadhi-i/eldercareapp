@@ -236,10 +236,10 @@ export default function MedicationScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Medication Management</Text>
           <TouchableOpacity
-            style={styles.addButton}
+            style={styles.addIconButton}
             onPress={() => setShowAddModal(true)}
           >
-            <Text style={styles.addButtonText}>+ Add Medication</Text>
+            <Ionicons name="add-circle" size={32} color="#d63384" />
           </TouchableOpacity>
         </View>
 
@@ -432,17 +432,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#d63384',
   },
-  addButton: {
-    backgroundColor: '#d63384',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+  addIconButton: {
+    padding: 8,
     borderRadius: 20,
-    marginTop: 6,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+    backgroundColor: 'rgba(214, 51, 132, 0.1)',
   },
   emptyWrapper: {
     alignItems: 'center',

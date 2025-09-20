@@ -82,7 +82,7 @@ export default function DailyRoutinesScreen() {
     setShowClock(false);
   };
 
-  const addTime = () => addTimeFromDate(timeDate);
+  // const addTime = () => addTimeFromDate(timeDate);
 
   const saveRoutine = async () => {
     if (!current.title || !(current.times && current.times.length)) {
@@ -128,8 +128,8 @@ export default function DailyRoutinesScreen() {
         <ScrollView contentContainerStyle={[styles.container, routines.length === 0 && styles.containerEmpty]}>
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Daily Routines</Text>
-            <TouchableOpacity style={styles.addButton} onPress={() => setShowAdd(true)}>
-              <Text style={styles.addButtonText}>+ Add Routine</Text>
+            <TouchableOpacity style={styles.addIconButton} onPress={() => setShowAdd(true)}>
+              <Ionicons name="add-circle" size={32} color="#d63384" />
             </TouchableOpacity>
           </View>
 
@@ -216,8 +216,7 @@ const styles = StyleSheet.create({
   containerEmpty: { justifyContent: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   headerTitle: { fontSize: 24, fontWeight: '700', color: '#d63384' },
-  addButton: { backgroundColor: '#d63384', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginTop: 6 },
-  addButtonText: { color: '#fff', fontWeight: '600' },
+  addIconButton: { padding: 8, borderRadius: 20, backgroundColor: 'rgba(214, 51, 132, 0.1)' },
   emptyWrapper: { alignItems: 'center' },
   emptyCard: { width: '100%', backgroundColor: 'rgba(255, 192, 203, 0.15)', borderRadius: 16, padding: 28, borderWidth: 1, borderColor: 'rgba(255, 192, 203, 0.3)', alignItems: 'center' },
   emptyText: { color: '#666', fontSize: 16 },
