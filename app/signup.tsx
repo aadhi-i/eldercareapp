@@ -1,3 +1,4 @@
+import { useIsFocused } from '@react-navigation/native';
 import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { router } from 'expo-router';
 import { signInWithPhoneNumber } from 'firebase/auth';
@@ -23,6 +24,7 @@ import { auth, firebaseConfig } from '../lib/firebaseConfig';
 
 export default function SignupScreen() {
   const { user, isLoading } = useAuth();
+  const isFocused = useIsFocused();
   const [countryCode, setCountryCode] = useState<CountryCode>('IN');
   const [country, setCountry] = useState<Country | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -30,10 +32,10 @@ export default function SignupScreen() {
   
   // Check if user is already authenticated and redirect to dashboard
   useEffect(() => {
-    if (user && !isLoading) {
+    if (isFocused && user && !isLoading) {
       router.replace('/dashboard');
     }
-  }, [user, isLoading]);
+  }, [isFocused, user, isLoading]);
 
   const onSelect = (country: Country) => {
     setCountryCode(country.cca2);

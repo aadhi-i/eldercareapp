@@ -14,7 +14,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { db } from '../lib/firebaseConfig';
+import { auth, db } from '../lib/firebaseConfig';
 
 interface Medicine {
   name: string;
@@ -235,10 +235,18 @@ export default function SetupProfile() {
       const familyMemberDoc = querySnapshot.docs[0];
       const familyMemberData = familyMemberDoc.data();
 
+      // Ensure the connecting user is authenticated so we can link by their Firebase uid
+  const currentUid = auth.currentUser?.uid;
+      if (!currentUid) {
+        Alert.alert('Authentication required', 'Please log in again to complete the connection.');
+        router.replace('/login');
+        return;
+      }
+
       // Create new user document for elder/caregiver
-      const newUserRef = doc(usersRef);
+      const newUserRef = doc(usersRef, currentUid);
       const userData: any = {
-        uid: newUserRef.id,
+        uid: currentUid,
         role: role || 'elder',
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim(),

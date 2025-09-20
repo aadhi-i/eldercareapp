@@ -44,13 +44,14 @@ export default function ChooseUser() {
     } else if (uid && phone && countryCode) {
       // New user registration - navigate to appropriate profile setup
       if (role === 'family') {
-        // Navigate to family-specific profile setup
+        // Navigate to profile setup with role "family"
         router.push({
-          pathname: '/setupProfileFamily',
+          pathname: '/setupProfile',
           params: {
             uid: uid,
             phone: phone,
             countryCode: countryCode,
+            role: 'family',
             name: name,
           },
         });

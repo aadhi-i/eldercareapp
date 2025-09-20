@@ -1,7 +1,10 @@
 // lib/firebaseConfig.ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
-import { getAuth, browserLocalPersistence, setPersistence } from 'firebase/auth';
+import { browserLocalPersistence, getAuth, setPersistence } from 'firebase/auth';
+// Removed direct import of getReactNativePersistence and initializeAuth
 import { getFirestore } from 'firebase/firestore';
+import { Platform } from 'react-native';
 
 export const firebaseConfig = {
   apiKey: "AIzaSyBlRKVEN8bs7A8qDQ1qYtIXEsoJWTLRCPM",
@@ -13,13 +16,31 @@ export const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
 
-// Set persistence to LOCAL to keep the user logged in until they explicitly log out
-setPersistence(auth, browserLocalPersistence)
-  .catch((error) => {
+// Use platform-appropriate persistence
+let auth: any;
+if (Platform.OS === 'web') {
+  auth = getAuth(app);
+  // Web: use browserLocalPersistence
+  setPersistence(auth, browserLocalPersistence).catch((error) => {
     console.error('Error setting persistence:', error);
   });
+} else {
+  // React Native: use AsyncStorage-based persistence
+  // Note: if your environment cannot resolve 'firebase/auth/react-native' types, you can
+  // fallback to getAuth(app) without persistence to avoid build errors.
+  try {
+    // Use dynamic require to avoid TypeScript import issues
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { initializeAuth, getReactNativePersistence } = require('firebase/auth/react-native');
+    auth = initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch (e) {
+    // Fallback: no explicit persistence
+    auth = getAuth(app);
+  }
+}
 
 const db = getFirestore(app);
 

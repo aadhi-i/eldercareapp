@@ -1,16 +1,9 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { getAuth, PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TextInput,
-  View
-} from 'react-native';
-import { db } from '../lib/firebaseConfig';
+import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { auth, db } from '../lib/firebaseConfig';
 
 export default function VerifyOTPFamily() {
   const { verificationId, phone, countryCode } = useLocalSearchParams<{
@@ -50,24 +43,48 @@ export default function VerifyOTPFamily() {
 
   const handleUserAccount = async (uid: string) => {
     try {
-      // Check if user already exists in Firestore
+      // Determine if user exists
       const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('phone', '==', phone));
-      const querySnapshot = await getDocs(q);
+      let exists = false;
 
-      if (!querySnapshot.empty) {
-        // User already exists, log them in
-        console.log('Existing family member found');
-        Alert.alert(
-          'Account Error',
-          'This phone number is already registered with a different account.'
-        );
+      // doc id == uid
+      const byId = await getDoc(doc(usersRef, uid));
+      if (byId.exists()) exists = true;
+
+      // field uid == uid
+      if (!exists) {
+        const byUid = await getDocs(query(usersRef, where('uid', '==', uid)));
+        exists = !byUid.empty;
+      }
+
+      // by phone variants
+      if (!exists && phone) {
+        const byExact = await getDocs(query(usersRef, where('phone', '==', phone)));
+        exists = !byExact.empty;
+
+        if (!exists) {
+          const digits = String(phone).replace(/\D/g, '');
+          const last10 = digits.slice(-10);
+          if (last10) {
+            const byLast10 = await getDocs(query(usersRef, where('phone', '==', last10)));
+            exists = !byLast10.empty;
+            if (!exists && /^\d{10}$/.test(last10)) {
+              const byNum = await getDocs(query(usersRef, where('phone', '==', Number(last10) as any)));
+              exists = !byNum.empty;
+            }
+          }
+        }
+      }
+
+      if (exists) {
+        console.log('Existing family member found, redirecting to dashboard.');
+        router.replace('/dashboard');
         return;
       }
 
-      // New user - navigate directly to setupProfile with family role
-      console.log('New user, navigating to setup profile with role family...');
-      router.push({
+      // New family signup -> complete family details
+      console.log('New family user, navigating to setup profile (family)...');
+      router.replace({
         pathname: '/setupProfile',
         params: {
           uid: uid,
@@ -79,10 +96,7 @@ export default function VerifyOTPFamily() {
       });
     } catch (error: any) {
       console.error('Error handling user account:', error);
-      Alert.alert(
-        'Account Error',
-        'Failed to verify your account. Please try again.'
-      );
+      Alert.alert('Account Error', 'Failed to verify your account. Please try again.');
     }
   };
 
@@ -95,10 +109,7 @@ export default function VerifyOTPFamily() {
     setLoading(true);
     try {
       const credential = PhoneAuthProvider.credential(verificationId, code);
-      const auth = getAuth();
       const userCredential = await signInWithCredential(auth, credential);
-      
-      // Handle user account creation/login
       await handleUserAccount(userCredential.user.uid);
     } catch (err: any) {
       console.error('OTP verification error:', err);

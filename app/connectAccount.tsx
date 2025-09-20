@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 
 export default function ConnectAccount() {
+  // Use any-cast wrapper to satisfy JSX typing across expo-camera versions
+  const CameraComponent: any = Camera as any;
   const [connectionCode, setConnectionCode] = useState('');
   const [scanning, setScanning] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
@@ -142,12 +144,13 @@ export default function ConnectAccount() {
       return;
     }
 
-    // Navigate to choose user page with connection code
+    // Navigate directly to profile setup with a default role (elder) to avoid user selection
     router.push({
-      pathname: '/chooseUser',
+      pathname: '/setupProfile',
       params: {
         connectionCode: codeToUse,
         isConnecting: 'true',
+        role: 'elder',
       },
     });
   };
@@ -160,9 +163,9 @@ export default function ConnectAccount() {
   if (scanning && hasPermission) {
     return (
       <View style={styles.container}>
-        <Camera
+        <CameraComponent
           style={styles.camera}
-          type={CameraType.back}
+          type={'back' as any}
           onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
           barcodeScannerSettings={{
             barcodeTypes: ['qr'],
@@ -183,7 +186,7 @@ export default function ConnectAccount() {
               <Text style={styles.cancelButtonText}>Cancel Scan</Text>
             </TouchableOpacity>
           </View>
-        </Camera>
+        </CameraComponent>
       </View>
     );
   }

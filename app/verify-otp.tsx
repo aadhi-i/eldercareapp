@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { getAuth, PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -10,7 +10,7 @@ import {
   TextInput,
   View
 } from 'react-native';
-import { db } from '../lib/firebaseConfig';
+import { auth, db } from '../lib/firebaseConfig';
 
 export default function VerifyOTP() {
   const { verificationId, phone, countryCode } = useLocalSearchParams<{
@@ -50,57 +50,71 @@ export default function VerifyOTP() {
 
   const handleUserAccount = async (uid: string) => {
     try {
-      // Check if user already exists in Firestore
+      // Prefer checking by Firebase auth uid (authoritative)
       const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('phone', '==', phone));
-      const querySnapshot = await getDocs(q);
+      let foundUserData: any | null = null;
 
-      if (!querySnapshot.empty) {
-        // User already exists, log them in
-        console.log('Existing user found, logging in...');
-        
-        // Check if this is an elderly user's phone number
-        const userData = querySnapshot.docs[0].data();
-        
-        if (userData.role === 'elder') {
-          // This is an elderly user, redirect to their dashboard
-          console.log('Elderly user found, redirecting to dashboard...');
-          router.replace('/dashboard');
-          return;
-        } else if (userData.role === 'family') {
-          // This is a family member, check if they have connected elderly accounts
-          console.log('Family member found, redirecting to dashboard...');
-          router.replace('/dashboard');
-          return;
+      // 0) Try direct document by uid (doc id == uid)
+      const byIdSnap = await getDoc(doc(usersRef, uid));
+      if (byIdSnap.exists()) {
+        foundUserData = byIdSnap.data();
+      }
+
+      // 1) Try by uid field
+      if (!foundUserData) {
+        const byUidQ = query(usersRef, where('uid', '==', uid));
+        const byUidSnap = await getDocs(byUidQ);
+        if (!byUidSnap.empty) {
+          foundUserData = byUidSnap.docs[0].data();
         }
-        
-        // For other roles, just redirect to dashboard
+      }
+
+      // 2) Try by phone variants
+      if (!foundUserData && phone) {
+        // 2a) exact phone string
+        const byPhoneExactQ = query(usersRef, where('phone', '==', phone));
+        const byPhoneExactSnap = await getDocs(byPhoneExactQ);
+        if (!byPhoneExactSnap.empty) {
+          foundUserData = byPhoneExactSnap.docs[0].data();
+        }
+
+        // 2b) last 10 digits string
+        if (!foundUserData) {
+          const digits = String(phone).replace(/\D/g, '');
+          const last10 = digits.slice(-10);
+          if (last10) {
+            const byPhoneLast10Q = query(usersRef, where('phone', '==', last10));
+            const byPhoneLast10Snap = await getDocs(byPhoneLast10Q);
+            if (!byPhoneLast10Snap.empty) {
+              foundUserData = byPhoneLast10Snap.docs[0].data();
+            }
+          }
+        }
+
+        // 2c) last 10 digits numeric (if stored as number type)
+        if (!foundUserData) {
+          const digits = String(phone).replace(/\D/g, '');
+          const last10 = digits.slice(-10);
+          if (last10 && /^\d{10}$/.test(last10)) {
+            const last10Num = Number(last10);
+            const byPhoneNumQ = query(usersRef, where('phone', '==', last10Num as any));
+            const byPhoneNumSnap = await getDocs(byPhoneNumQ);
+            if (!byPhoneNumSnap.empty) {
+              foundUserData = byPhoneNumSnap.docs[0].data();
+            }
+          }
+        }
+      }
+
+      if (foundUserData) {
+        console.log('Existing user found, redirecting to dashboard...');
         router.replace('/dashboard');
         return;
       }
 
-      // Check if this is an elderly account login attempt
-      const elderlyRef = collection(db, 'users');
-      const elderlyQuery = query(elderlyRef, where('phone', '==', phone), where('role', '==', 'elder'));
-      const elderlySnapshot = await getDocs(elderlyQuery);
-      
-      if (!elderlySnapshot.empty) {
-        // This is an elderly account login, skip chooseUser and go directly to dashboard
-        console.log('Elderly account detected, redirecting to dashboard...');
-        router.replace('/dashboard');
-        return;
-      }
-      
-      // For new non-elderly users - navigate to choose user type
-      console.log('New user, navigating to choose user type...');
-      router.push({
-        pathname: '/chooseUser',
-        params: {
-          uid: uid,
-          phone: phone,
-          countryCode: countryCode,
-        },
-      });
+      // Unknown/new user via general OTP → elder must connect using a code
+      console.log('User record not found; redirecting to connectAccount for elder onboarding.');
+      router.replace('/connectAccount');
     } catch (error: any) {
       console.error('Error handling user account:', error);
       Alert.alert(
@@ -118,9 +132,8 @@ export default function VerifyOTP() {
 
     setLoading(true);
     try {
-      const credential = PhoneAuthProvider.credential(verificationId, code);
-      const auth = getAuth();
-      const userCredential = await signInWithCredential(auth, credential);
+  const credential = PhoneAuthProvider.credential(verificationId, code);
+  const userCredential = await signInWithCredential(auth, credential);
       
       // Handle user account creation/login
       await handleUserAccount(userCredential.user.uid);
@@ -199,10 +212,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f5b4c6',
     borderRadius: 10,
-    padding: 12,
-    fontSize: 18,
-    width: 50,
+    width: 45,
+    height: 45,
     textAlign: 'center',
+    fontSize: 18,
     backgroundColor: '#fff',
   },
 });
