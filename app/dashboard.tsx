@@ -8,6 +8,7 @@ import { default as React, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, PermissionsAndroid, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../components/AuthProvider';
 import DrawerLayout from '../components/DrawerLayout';
+// Fall detection handled globally via DrawerLayout
 import { auth, db } from '../lib/firebaseConfig';
 
 export default function Dashboard() {
@@ -22,6 +23,7 @@ export default function Dashboard() {
   const [listening, setListening] = useState(false);
   const [sttStatus, setSttStatus] = useState<string>('');
   const recognizingRef = useRef(false);
+  // Global fall detection state managed in DrawerLayout
 
   // Animated values for Gemini-like activation effect
   const glow = useRef(new Animated.Value(0)).current;
@@ -130,6 +132,8 @@ export default function Dashboard() {
     fetchUserData();
   }, [authLoading, user?.uid]);
 
+  // Fall toggle loaded in DrawerLayout
+
   // Voice assistant activation animations
   useEffect(() => {
     const startAnimations = () => {
@@ -181,25 +185,32 @@ export default function Dashboard() {
   }, [voiceActive, glow, ripple1, ripple2, ripple3]);
 
   // Setup speech recognition listeners
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    Voice.onSpeechResults = (e: any) => {
+    const V: any = Voice as any;
+    if (!V || typeof V !== 'object') {
+      // Speech library not available (e.g., web or missing native), skip wiring
+      return;
+    }
+    V.onSpeechResults = (e: any) => {
       const text = (e?.value?.[0] || '').toLowerCase();
       if (!text) return;
       setTranscript(text);
       handleVoiceCommand(text);
     };
-    Voice.onSpeechPartialResults = (e: any) => {
+    V.onSpeechPartialResults = (e: any) => {
       const text = (e?.value?.[0] || '').toLowerCase();
       if (!text) return;
       setTranscript(text);
     };
-    Voice.onSpeechStart = () => { setListening(true); setSttStatus('Listening…'); };
-    Voice.onSpeechEnd = async () => {
+    V.onSpeechStart = () => { setListening(true); setSttStatus('Listening…'); };
+    V.onSpeechEnd = async () => {
       setListening(false);
       setSttStatus('');
       // Auto-restart to keep listening continuously
       if (voiceActive) {
-        setTimeout(async () => {
+        if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = setTimeout(async () => {
           try {
             // Avoid capturing our own TTS
             const speaking = await (Speech as any).isSpeakingAsync?.();
@@ -208,19 +219,32 @@ export default function Dashboard() {
         }, 250);
       }
     };
-    Voice.onSpeechError = (e: any) => {
+    V.onSpeechError = (e: any) => {
       setListening(false);
       setSttStatus('Speech error. Trying again…');
       if (voiceActive) {
-        setTimeout(() => { startListening(); }, 400);
+        if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = setTimeout(() => { startListening(); }, 400);
       }
     };
 
     return () => {
-      Voice.destroy().catch(() => {});
-      Voice.removeAllListeners();
+      try {
+        if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+        // Clear handlers first to avoid assigning on a torn-down module
+        V.onSpeechResults = undefined;
+        V.onSpeechPartialResults = undefined;
+        V.onSpeechStart = undefined;
+        V.onSpeechEnd = undefined;
+        V.onSpeechError = undefined;
+        V.stop?.().catch?.(() => {});
+        V.destroy?.().catch?.(() => {});
+        V.removeAllListeners?.();
+      } catch {}
     };
   }, []);
+
+  // Hook enable/disable handled in DrawerLayout
 
   // Start listening with availability and permission checks
   const startListening = async () => {
@@ -506,6 +530,8 @@ export default function Dashboard() {
               : 'No routines scheduled'}
           </Text>
         </View>
+
+        {/* Fall Detection toggle moved to Drawer */}
       </ScrollView>
 
       {/* Voice activation overlay: Fullscreen blur + flowing gradient + ripples/glow */}
@@ -626,6 +652,9 @@ export default function Dashboard() {
           <Ionicons name="mic" size={40} color="#fff" />
         </TouchableOpacity>
       </View>
+
+      {/* Fall Alert Modal */}
+      {/* Fall alert modal handled globally in DrawerLayout */}
     </DrawerLayout>
   );
 }
@@ -813,4 +842,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
   },
+  // Fall detection toggle styles moved to DrawerLayout
 });

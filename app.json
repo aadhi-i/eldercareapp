@@ -12,7 +12,8 @@
     "ios": {
         "supportsTablet": true,
         "infoPlist": {
-          "NSMicrophoneUsageDescription": "This app uses the microphone to let you speak to the assistant for medicines, routines, and helpful guidance."
+          "NSMicrophoneUsageDescription": "This app uses the microphone to let you speak to the assistant for medicines, routines, and helpful guidance.",
+          "NSMotionUsageDescription": "Motion data helps detect falls using the accelerometer and gyroscope."
         }
     },
     "android": {
