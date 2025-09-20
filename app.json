@@ -10,10 +10,15 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+        "supportsTablet": true,
+        "infoPlist": {
+          "NSMicrophoneUsageDescription": "This app uses the microphone to let you speak to the assistant for medicines, routines, and helpful guidance.",
+          "NSMotionUsageDescription": "Motion data helps detect falls using the accelerometer and gyroscope."
+        }
     },
     "android": {
       "package": "com.adithyasnair.eldercare",
+        "permissions": ["RECORD_AUDIO"],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
