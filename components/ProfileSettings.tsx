@@ -481,13 +481,7 @@ export default function ProfileSettings() {
             </View>
           )}
           
-          {currentUserRole === 'elder' && (
-            <View style={styles.readOnlyNotice}>
-              <Text style={styles.readOnlyText}>
-                📖 This is your profile. Contact your family member to make changes.
-              </Text>
-            </View>
-          )}
+          
         </View>
       )}
 
@@ -531,13 +525,7 @@ export default function ProfileSettings() {
             ))}
           </View>
           
-          {currentUserRole === 'elder' && (
-            <View style={styles.readOnlyNotice}>
-              <Text style={styles.readOnlyText}>
-                📖 Contact your family member to update medications.
-              </Text>
-            </View>
-          )}
+          
         </View>
       )}
 
@@ -564,13 +552,7 @@ export default function ProfileSettings() {
             </Text>
           </View>
           
-          {currentUserRole === 'elder' && (
-            <View style={styles.readOnlyNotice}>
-              <Text style={styles.readOnlyText}>
-                📖 Contact your family member to update emergency contact.
-              </Text>
-            </View>
-          )}
+          
         </View>
       )}
 

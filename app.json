@@ -18,7 +18,7 @@
     },
     "android": {
       "package": "com.adithyasnair.eldercare",
-        "permissions": ["RECORD_AUDIO"],
+        "permissions": ["RECORD_AUDIO", "POST_NOTIFICATIONS"],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"

@@ -1,0 +1,18 @@
+diff --git a/node_modules/expo-firebase-core/android/build.gradle b/node_modules/expo-firebase-core/android/build.gradle
+index 8a5c2ab..b1b2a3c 100644
+--- a/node_modules/expo-firebase-core/android/build.gradle
++++ b/node_modules/expo-firebase-core/android/build.gradle
+@@
+-task androidSourcesJar(type: Jar) {
+-  classifier = 'sources'
+-  from android.sourceSets.main.java.srcDirs
+-}
++// Gradle 7/8 compatibility: use archiveClassifier.set instead of deprecated classifier
++tasks.register('androidSourcesJar', Jar) {
++  archiveClassifier.set('sources')
++  from android.sourceSets.main.java.srcDirs
++}
+@@
+-        artifact(androidSourcesJar)
++        artifact(tasks.named('androidSourcesJar'))
+*** End Patch
