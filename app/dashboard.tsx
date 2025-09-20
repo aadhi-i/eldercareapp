@@ -18,45 +18,64 @@ export default function Dashboard() {
       try {
         // Wait until auth is ready
         if (authLoading) return;
-        if (!auth.currentUser) {
-          setLoading(false);
-          return;
-        }
-
-        const uid = auth.currentUser.uid;
-        const phoneNumber = auth.currentUser.phoneNumber || '';
+        
         const usersRef = collection(db, 'users');
-
-        // 1) Try by doc id (uid)
         let currentUserData: any | null = null;
-        const byIdSnap = await getDoc(doc(usersRef, uid));
-        if (byIdSnap.exists()) {
-          currentUserData = byIdSnap.data();
-        }
 
-        // 2) Try by uid field
-        if (!currentUserData) {
-          const byUidSnap = await getDocs(query(usersRef, where('uid', '==', uid)));
-          if (!byUidSnap.empty) currentUserData = byUidSnap.docs[0].data();
-        }
+        // If user is authenticated, try to find their data
+        if (auth.currentUser) {
+          const uid = auth.currentUser.uid;
+          const phoneNumber = auth.currentUser.phoneNumber || '';
 
-        // 3) Try by phone variants
-        if (!currentUserData && phoneNumber) {
-          const exact = await getDocs(query(usersRef, where('phone', '==', phoneNumber)));
-          if (!exact.empty) currentUserData = exact.docs[0].data();
+          // 1) Try by doc id (uid)
+          const byIdSnap = await getDoc(doc(usersRef, uid));
+          if (byIdSnap.exists()) {
+            currentUserData = byIdSnap.data();
+          }
 
+          // 2) Try by uid field
           if (!currentUserData) {
-            const digits = String(phoneNumber).replace(/\D/g, '');
-            const last10 = digits.slice(-10);
-            if (last10) {
-              const byLast10 = await getDocs(query(usersRef, where('phone', '==', last10)));
-              if (!byLast10.empty) currentUserData = byLast10.docs[0].data();
+            const byUidSnap = await getDocs(query(usersRef, where('uid', '==', uid)));
+            if (!byUidSnap.empty) currentUserData = byUidSnap.docs[0].data();
+          }
 
-              if (!currentUserData && /^\d{10}$/.test(last10)) {
-                const byNum = await getDocs(query(usersRef, where('phone', '==', Number(last10) as any)));
-                if (!byNum.empty) currentUserData = byNum.docs[0].data();
+          // 3) Try by phone variants
+          if (!currentUserData && phoneNumber) {
+            const exact = await getDocs(query(usersRef, where('phone', '==', phoneNumber)));
+            if (!exact.empty) currentUserData = exact.docs[0].data();
+
+            if (!currentUserData) {
+              const digits = String(phoneNumber).replace(/\D/g, '');
+              const last10 = digits.slice(-10);
+              if (last10) {
+                const byLast10 = await getDocs(query(usersRef, where('phone', '==', last10)));
+                if (!byLast10.empty) currentUserData = byLast10.docs[0].data();
+
+                if (!currentUserData && /^\d{10}$/.test(last10)) {
+                  const byNum = await getDocs(query(usersRef, where('phone', '==', Number(last10) as any)));
+                  if (!byNum.empty) currentUserData = byNum.docs[0].data();
+                }
               }
             }
+          }
+        }
+
+        // If no authenticated user or no data found, try to find the most recent elder data
+        // This handles the case where elder was saved without authentication
+        if (!currentUserData) {
+          const elderQuery = query(usersRef, where('role', '==', 'elder'));
+          const elderSnapshot = await getDocs(elderQuery);
+          
+          if (!elderSnapshot.empty) {
+            // Get the most recently created elder (by createdAt timestamp)
+            const elders = elderSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const sortedElders = elders.sort((a, b) => {
+              const aTime = a.createdAt?.toDate?.() || new Date(0);
+              const bTime = b.createdAt?.toDate?.() || new Date(0);
+              return bTime.getTime() - aTime.getTime();
+            });
+            
+            currentUserData = sortedElders[0];
           }
         }
 
@@ -119,7 +138,9 @@ export default function Dashboard() {
           <Text style={styles.cardTitle}>Profile Information</Text>
           <Text style={styles.cardContent}>
             • Name: {userData?.firstName} {userData?.lastName}
-            {"\n"}• Age: {userData?.age}
+            {"\n"}• Age: {userData?.age || 'Not specified'}
+            {"\n"}• Phone: {userData?.phone ? formatPhoneWithCountryCode(userData.phone) : 'Not specified'}
+            {"\n"}• Address: {userData?.address || 'Not specified'}
             {"\n"}• Health Status: {userData?.healthStatus || 'Not specified'}
             {"\n"}• Medical Conditions: {userData?.illnesses || 'None specified'}
           </Text>
@@ -160,9 +181,24 @@ export default function Dashboard() {
           </View>
         )}
 
+        {/* Elder's Personal Medicines */}
+        {userData?.medicines && userData.medicines.length > 0 && (
+          <View style={styles.cardWhite}>
+            <Text style={styles.cardTitle}>Personal Medications</Text>
+            <Text style={styles.cardContent}>
+              {userData.medicines
+                .map((m: any) => {
+                  const timesStr = Array.isArray(m.timings) ? m.timings.join(', ') : '';
+                  return `• ${m.name ?? ''} — ${m.dosage ?? ''}${timesStr ? ` — ${timesStr}` : ''}`;
+                })
+                .join('\n')}
+            </Text>
+          </View>
+        )}
+
         {/* Medicines Card (from family member account) */}
         <View style={styles.cardWhite}>
-          <Text style={styles.cardTitle}>Medications</Text>
+          <Text style={styles.cardTitle}>Family Member's Medications</Text>
           <Text style={styles.cardContent}>
             {medications && medications.length > 0
               ? medications
@@ -172,7 +208,7 @@ export default function Dashboard() {
                     return `• ${m.name ?? ''} — ${m.dosage ?? ''}${timesStr ? ` — ${timesStr}` : ''}`;
                   })
                   .join('\n')
-              : 'No medications scheduled'}
+              : 'No medications scheduled by family member'}
           </Text>
         </View>
 

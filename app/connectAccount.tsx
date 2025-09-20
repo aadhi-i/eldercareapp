@@ -1,4 +1,5 @@
 import { Camera } from 'expo-camera';
+import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -144,9 +145,9 @@ export default function ConnectAccount() {
       return;
     }
 
-    // Navigate directly to profile setup with a default role (elder) to avoid user selection
+    // Navigate directly to Fill Elder Details screen
     router.push({
-      pathname: '/setupProfile',
+      pathname: '/fillElderDetails',
       params: {
         connectionCode: codeToUse,
         isConnecting: 'true',
@@ -158,6 +159,27 @@ export default function ConnectAccount() {
   const resetScanner = () => {
     setScanned(false);
     setScanning(false);
+  };
+
+  const handlePasteCode = async () => {
+    try {
+      const clipboardContent = await Clipboard.getStringAsync();
+      if (clipboardContent && clipboardContent.trim()) {
+        // Validate if the clipboard content looks like a connection code
+        const codeRegex = /^[A-Z0-9]{6}$/;
+        if (codeRegex.test(clipboardContent.trim())) {
+          setConnectionCode(clipboardContent.trim());
+          Alert.alert('Code Pasted', 'Connection code pasted from clipboard');
+        } else {
+          Alert.alert('Invalid Code', 'The clipboard content is not a valid connection code');
+        }
+      } else {
+        Alert.alert('Empty Clipboard', 'No content found in clipboard');
+      }
+    } catch (error) {
+      console.error('Failed to paste code:', error);
+      Alert.alert('Paste Failed', 'Failed to paste code from clipboard');
+    }
   };
 
   if (scanning && hasPermission) {
@@ -237,15 +259,20 @@ export default function ConnectAccount() {
 
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Enter Connection Code:</Text>
-          <TextInput
-            style={styles.input}
-            value={connectionCode}
-            onChangeText={setConnectionCode}
-            placeholder="Enter 6-digit code (e.g., ABC123)"
-            autoCapitalize="characters"
-            maxLength={6}
-            autoFocus
-          />
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              value={connectionCode}
+              onChangeText={setConnectionCode}
+              placeholder="Enter 6-digit code (e.g., ABC123)"
+              autoCapitalize="characters"
+              maxLength={6}
+              autoFocus
+            />
+            <TouchableOpacity style={styles.pasteButton} onPress={handlePasteCode}>
+              <Text style={styles.pasteButtonText}>📋 Paste</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <TouchableOpacity 
@@ -335,16 +362,35 @@ const styles = StyleSheet.create({
     color: '#cc2b5e',
     marginBottom: 8,
   },
-  input: {
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: '#f5b4c6',
     borderRadius: 10,
+    backgroundColor: '#fff',
+  },
+  input: {
+    flex: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    backgroundColor: '#fff',
     textAlign: 'center',
     letterSpacing: 2,
+  },
+  pasteButton: {
+    backgroundColor: '#f5b4c6',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopRightRadius: 9,
+    borderBottomRightRadius: 9,
+    borderLeftWidth: 1,
+    borderLeftColor: '#f5b4c6',
+  },
+  pasteButtonText: {
+    color: '#cc2b5e',
+    fontSize: 14,
+    fontWeight: '600',
   },
   connectButton: {
     backgroundColor: '#cc2b5e',

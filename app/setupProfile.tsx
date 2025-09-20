@@ -252,7 +252,7 @@ export default function SetupProfile() {
         lastName: formData.lastName.trim(),
         age: formData.age ? parseInt(formData.age) : null,
         address: formData.address.trim() || null,
-        emergencyContact: formData.emergencyContact.trim(),
+        emergencyContact: familyMemberData.phone, // Always use family member's phone as emergency contact
         healthStatus: formData.healthStatus.trim() || null,
         illnesses: formData.illnesses.trim() || null,
         medicines: medicines,
@@ -392,15 +392,16 @@ export default function SetupProfile() {
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Emergency Contact *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, isConnecting === 'true' && role === 'elder' && styles.disabledInput]}
                   value={formData.emergencyContact}
                   onChangeText={(value) => handleInputChange('emergencyContact', value)}
                   placeholder="Enter emergency contact number"
                   keyboardType="phone-pad"
+                  editable={!(isConnecting === 'true' && role === 'elder')}
                 />
                 {isConnecting === 'true' && role === 'elder' && (
                   <Text style={styles.helperText}>
-                    This will be auto-filled from the family member's phone number
+                    This is automatically set to your family member's phone number and cannot be changed
                   </Text>
                 )}
               </View>
@@ -698,6 +699,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#fff',
     marginBottom: 10,
+  },
+  disabledInput: {
+    backgroundColor: '#f5f5f5',
+    color: '#666',
   },
   textArea: {
     height: 80,

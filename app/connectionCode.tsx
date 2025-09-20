@@ -1,13 +1,14 @@
+import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useAuth } from '../components/AuthProvider';
@@ -47,6 +48,17 @@ export default function ConnectionCode() {
     maybeFetchFromDb();
   }, [user?.uid]);
 
+  const handleCopyCode = async () => {
+    if (!code) return;
+    try {
+      await Clipboard.setStringAsync(code);
+      Alert.alert('Code Copied', 'Connection code copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy code:', error);
+      Alert.alert('Copy Failed', 'Failed to copy code to clipboard');
+    }
+  };
+
   const handleContinue = () => {
     if (!code) return;
     Alert.alert(
@@ -55,9 +67,7 @@ export default function ConnectionCode() {
       [
         {
           text: 'Copy Code',
-          onPress: () => {
-            Alert.alert('Code Copied', 'Connection code copied to clipboard');
-          },
+          onPress: handleCopyCode,
         },
         {
           text: 'Continue',
@@ -94,6 +104,11 @@ export default function ConnectionCode() {
             <QRCode value={code} size={200} color="#cc2b5e" backgroundColor="white" />
           </View>
         </View>
+        
+        <TouchableOpacity style={styles.copyButton} onPress={handleCopyCode}>
+          <Text style={styles.copyButtonText}>📋 Copy Code</Text>
+        </TouchableOpacity>
+        
         <TouchableOpacity style={styles.button} onPress={handleContinue}>
           <Text style={styles.buttonText}>Continue to Dashboard</Text>
         </TouchableOpacity>
@@ -170,7 +185,7 @@ const styles = StyleSheet.create({
   },
   qrContainer: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 20,
   },
   qrWrapper: {
     backgroundColor: 'white',
@@ -180,6 +195,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 5,
     elevation: 3,
+  },
+  copyButton: {
+    backgroundColor: '#f5b4c6',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#cc2b5e',
+  },
+  copyButtonText: {
+    color: '#cc2b5e',
+    fontSize: 16,
+    fontWeight: '600',
   },
   button: {
     backgroundColor: '#cc2b5e',
