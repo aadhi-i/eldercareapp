@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { addDoc, collection, doc, DocumentData, onSnapshot, query, QueryDocumentSnapshot, updateDoc, where } from 'firebase/firestore';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../components/AuthProvider';
@@ -175,7 +175,7 @@ export default function MedicineStockScreen() {
   return (
     <DrawerLayout>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.container}>
+  <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.header}>
             <Text style={styles.title}>Medicine Stock</Text>
             <TouchableOpacity style={styles.addIconButton}>

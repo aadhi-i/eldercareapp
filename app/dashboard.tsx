@@ -1,58 +1,65 @@
 import { Ionicons } from '@expo/vector-icons';
-import Voice from '@react-native-voice/voice';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
-import { default as React, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, PermissionsAndroid, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../components/AuthProvider';
 import DrawerLayout from '../components/DrawerLayout';
-// Fall detection handled globally via DrawerLayout
 import { auth, db } from '../lib/firebaseConfig';
 import { reminderService } from '../services/reminderService';
 
+// Avoid static import so Expo Go doesn't crash if the native module isn't available
+// Detect Expo Go via global expo runtime flag and skip requiring native module there.
+const Voice: any = (() => {
+  try {
+    const isExpoGo = !!(global as any).ExpoModules;
+    if (isExpoGo) return {} as any;
+    return require('@react-native-voice/voice').default;
+  } catch {
+    return {} as any;
+  }
+})();
+
 export default function Dashboard() {
   const { user, isLoading: authLoading } = useAuth();
+
+  // Data/UI state
   const [loading, setLoading] = useState(true);
-  const [elderData, setElderData] = useState<any>(null);
-  const [familyData, setFamilyData] = useState<any>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<'elder' | 'family' | null>(null);
+  const [elderData, setElderData] = useState<any | null>(null);
+  const [familyData, setFamilyData] = useState<any | null>(null);
   const [medications, setMedications] = useState<any[]>([]);
   const [routines, setRoutines] = useState<any[]>([]);
   const [upcomingMedications, setUpcomingMedications] = useState<any[]>([]);
   const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
-  const [currentUserRole, setCurrentUserRole] = useState<string>('');
-  const [voiceActive, setVoiceActive] = useState(false);
-  const [transcript, setTranscript] = useState<string>('');
-  const [listening, setListening] = useState(false);
-  const [sttStatus, setSttStatus] = useState<string>('');
-  const recognizingRef = useRef(false);
-  // Global fall detection state managed in DrawerLayout
 
-  // Animated values for Gemini-like activation effect
+  // Voice/TTS state
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [sttStatus, setSttStatus] = useState('');
+  const [transcript, setTranscript] = useState('');
+  const recognizingRef = useRef(false);
+
+  // Animations
   const glow = useRef(new Animated.Value(0)).current;
   const ripple1 = useRef(new Animated.Value(0)).current;
   const ripple2 = useRef(new Animated.Value(0)).current;
   const ripple3 = useRef(new Animated.Value(0)).current;
   const flow = useRef(new Animated.Value(0)).current;
-  const glowLoopRef = useRef<Animated.CompositeAnimation | null>(null);
-  const rippleLoopsRef = useRef<Animated.CompositeAnimation[]>([]);
-  const flowLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  const glowLoopRef = useRef<any>(null);
+  const rippleLoopsRef = useRef<any[]>([]);
+  const flowLoopRef = useRef<any>(null);
 
+  // Fetch elder/family and shared data
   useEffect(() => {
     const fetchSharedData = async () => {
       try {
-        // Wait until auth is ready
-        if (authLoading) return;
-        
-        // Initialize reminder service
-        await reminderService.initialize();
-        
         const usersRef = collection(db, 'users');
         let currentUserData: any | null = null;
-        let elderProfileData: any = null;
+        let elderProfileData: any | null = null;
 
-        // If user is authenticated, try to find their data
         if (auth.currentUser) {
           const uid = auth.currentUser.uid;
           const phoneNumber = auth.currentUser.phoneNumber || '';
@@ -94,30 +101,25 @@ export default function Dashboard() {
         if (!currentUserData) {
           const elderQuery = query(usersRef, where('role', '==', 'elder'));
           const elderSnapshot = await getDocs(elderQuery);
-          
           if (!elderSnapshot.empty) {
-            // Get the most recently created elder (by createdAt timestamp)
-            const elders: any[] = elderSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const elders: any[] = elderSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
             const sortedElders = elders.sort((a, b) => {
               const aTime = a.createdAt?.toDate?.() || new Date(0);
               const bTime = b.createdAt?.toDate?.() || new Date(0);
               return bTime.getTime() - aTime.getTime();
             });
-            
             currentUserData = sortedElders[0];
           }
         }
 
         if (currentUserData) {
-          console.log('Dashboard: Found user data:', currentUserData.role, currentUserData.firstName);
           setCurrentUserRole(currentUserData.role);
-          
+
           // Determine elder profile data based on user role
           if (currentUserData.role === 'elder') {
-            // If current user is elder, use their data
             elderProfileData = currentUserData;
             setElderData(currentUserData);
-            
+
             // Fetch connected family member data
             if (currentUserData.connectedTo) {
               const familyDocRef = doc(usersRef, currentUserData.connectedTo);
@@ -125,11 +127,9 @@ export default function Dashboard() {
               if (familyDoc.exists()) setFamilyData(familyDoc.data());
             }
           } else if (currentUserData.role === 'family') {
-            // If current user is family member, find connected elder
             setFamilyData(currentUserData);
-            
+
             if (currentUserData.connectedElders && currentUserData.connectedElders.length > 0) {
-              // Get the first connected elder (can be extended for multiple elders)
               const elderDocRef = doc(usersRef, currentUserData.connectedElders[0]);
               const elderDoc = await getDoc(elderDocRef);
               if (elderDoc.exists()) {
@@ -137,11 +137,10 @@ export default function Dashboard() {
                 setElderData(elderProfileData);
               }
             } else {
-              // Try to find elder by connection code
-              const elderQuery = query(usersRef, where('connectedTo', '==', currentUserData.uid));
-              const elderSnapshot = await getDocs(elderQuery);
-              if (!elderSnapshot.empty) {
-                elderProfileData = elderSnapshot.docs[0].data();
+              const elderQ = query(usersRef, where('connectedTo', '==', currentUserData.uid));
+              const elderSnap = await getDocs(elderQ);
+              if (!elderSnap.empty) {
+                elderProfileData = elderSnap.docs[0].data();
                 setElderData(elderProfileData);
               }
             }
@@ -152,7 +151,7 @@ export default function Dashboard() {
             await fetchSharedMedicationsAndRoutines(elderProfileData);
             await fetchUpcomingMedications(elderProfileData);
             await fetchLowStockAlerts(elderProfileData);
-            
+
             // Schedule reminders for the elder profile
             if (currentUserData.role === 'elder') {
               await reminderService.scheduleAllReminders(currentUserData.uid);
@@ -464,7 +463,8 @@ export default function Dashboard() {
         setTranscript('');
         setSttStatus('');
         if (recognizingRef.current) {
-          Voice.stop().catch(() => {});
+          // Guarded stop: in Expo Go Voice may be unavailable
+          (Voice as any)?.stop?.().catch?.(() => {});
           recognizingRef.current = false;
         }
       }
@@ -573,60 +573,7 @@ export default function Dashboard() {
           </Text>
         </View>
 
-        {/* Elder Profile Information */}
-        {elderData && (
-          <View style={styles.cardWhite}>
-            <Text style={styles.cardTitle}>👤 Elder Profile</Text>
-            <View style={styles.profileSection}>
-              <View style={styles.profileRow}>
-                <Text style={styles.profileLabel}>Name:</Text>
-                <Text style={styles.profileValue}>{elderData.firstName} {elderData.lastName}</Text>
-              </View>
-              
-              {elderData.age && (
-                <View style={styles.profileRow}>
-                  <Text style={styles.profileLabel}>Age:</Text>
-                  <Text style={styles.profileValue}>{elderData.age} years</Text>
-                </View>
-              )}
-              
-              {elderData.phone && (
-                <View style={styles.profileRow}>
-                  <Text style={styles.profileLabel}>Phone:</Text>
-                  <Text style={styles.profileValue}>{elderData.phone}</Text>
-                </View>
-              )}
-              
-              {elderData.address && (
-                <View style={styles.profileRow}>
-                  <Text style={styles.profileLabel}>Address:</Text>
-                  <Text style={styles.profileValue}>{elderData.address}</Text>
-                </View>
-              )}
-              
-              {elderData.emergencyContact && (
-                <View style={styles.profileRow}>
-                  <Text style={styles.profileLabel}>Emergency Contact:</Text>
-                  <Text style={styles.profileValue}>{elderData.emergencyContact}</Text>
-                </View>
-              )}
-              
-              {elderData.healthStatus && (
-                <View style={styles.profileRow}>
-                  <Text style={styles.profileLabel}>Health Status:</Text>
-                  <Text style={styles.profileValue}>{elderData.healthStatus}</Text>
-                </View>
-              )}
-              
-              {elderData.illnesses && (
-                <View style={styles.profileRow}>
-                  <Text style={styles.profileLabel}>Medical Conditions:</Text>
-                  <Text style={styles.profileValue}>{elderData.illnesses}</Text>
-                </View>
-              )}
-            </View>
-          </View>
-        )}
+        {/* Profile details moved to Profile tab (app/settings.tsx). Removed from dashboard. */}
 
         {/* 1. Upcoming Medications - Max 3 items */}
         <View style={[styles.cardWhite, styles.priorityCard]}>

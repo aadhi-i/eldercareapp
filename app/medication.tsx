@@ -232,7 +232,7 @@ export default function MedicationScreen() {
   return (
     <DrawerLayout>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={[styles.container, medications.length === 0 && styles.containerEmpty]}>        
+  <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>Medication Management</Text>
           <TouchableOpacity
@@ -418,9 +418,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     flexGrow: 1,
   },
-  containerEmpty: {
-    justifyContent: 'center',
-  },
+  // Removed vertical centering to keep content top-aligned
+  containerEmpty: {},
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',

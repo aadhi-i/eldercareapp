@@ -125,7 +125,7 @@ export default function DailyRoutinesScreen() {
   return (
     <DrawerLayout>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={[styles.container, routines.length === 0 && styles.containerEmpty]}>
+  <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Daily Routines</Text>
             <TouchableOpacity style={styles.addIconButton} onPress={() => setShowAdd(true)}>
@@ -213,7 +213,8 @@ export default function DailyRoutinesScreen() {
 
 const styles = StyleSheet.create({
   container: { padding: 20, paddingTop: 80, backgroundColor: '#fff', flexGrow: 1 },
-  containerEmpty: { justifyContent: 'center' },
+  // Removed vertical centering to keep content top-aligned
+  containerEmpty: {},
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   headerTitle: { fontSize: 24, fontWeight: '700', color: '#d63384' },
   addIconButton: { padding: 8, borderRadius: 20, backgroundColor: 'rgba(214, 51, 132, 0.1)' },

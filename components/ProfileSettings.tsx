@@ -8,6 +8,7 @@ interface Medicine {
   name: string;
   timings: string[];
   dosage: string;
+  stock?: number;
 }
 
 interface UserProfile {
@@ -55,60 +56,123 @@ export default function ProfileSettings() {
       const usersRef = collection(db, 'users');
       const userDocRef = doc(usersRef, currentUser.uid);
       const userDoc = await getDoc(userDocRef);
-      
+
       let userData: UserProfile | null = null;
-      
-      if (!userDoc.exists()) {
-        // Try to find user by phone number
-        const q = query(usersRef, where('phone', '==', currentUser.phoneNumber));
-        const querySnapshot = await getDocs(q);
-        
-        if (querySnapshot.empty) {
-          // If no user found by UID or phone, try to find any elder connected to this family member
-          // This handles the case where an elder was created without proper authentication
+
+      if (userDoc.exists()) {
+        const data = userDoc.data() as UserProfile;
+        userData = { ...data, uid: data.uid || currentUser.uid };
+      } else {
+        // 1) Try by uid field
+        const byUidSnap = await getDocs(query(usersRef, where('uid', '==', currentUser.uid)));
+        if (!byUidSnap.empty) {
+          const d = byUidSnap.docs[0];
+          const data = d.data() as UserProfile;
+          userData = { ...data, uid: data.uid || currentUser.uid };
+        }
+        // 2) Try by phone number (and common variants)
+        if (!userData && currentUser.phoneNumber) {
+          const phone = currentUser.phoneNumber;
+          const exact = await getDocs(query(usersRef, where('phone', '==', phone)));
+          if (!exact.empty) {
+            const d = exact.docs[0];
+            const data = d.data() as UserProfile;
+            userData = { ...data, uid: data.uid || currentUser.uid };
+          }
+          if (!userData) {
+            const digits = String(phone).replace(/\D/g, '');
+            const last10 = digits.slice(-10);
+            if (last10) {
+              const byLast10 = await getDocs(query(usersRef, where('phone', '==', last10)));
+              if (!byLast10.empty) {
+                const d = byLast10.docs[0];
+                const data = d.data() as UserProfile;
+                userData = { ...data, uid: data.uid || currentUser.uid };
+              }
+              if (!userData && /^\d{10}$/.test(last10)) {
+                const byNum = await getDocs(query(usersRef, where('phone', '==', Number(last10) as any)));
+                if (!byNum.empty) {
+                  const d = byNum.docs[0];
+                  const data = d.data() as UserProfile;
+                  userData = { ...data, uid: data.uid || currentUser.uid };
+                }
+              }
+            }
+          }
+        }
+
+        // 3) As a last resort for family: try to find any elder connected to this account
+        if (!userData) {
           const elderQuery = query(usersRef, where('connectedTo', '==', currentUser.uid));
           const elderSnapshot = await getDocs(elderQuery);
-          
           if (!elderSnapshot.empty) {
-            // Found connected elder, use their data
-            const elderData = elderSnapshot.docs[0].data() as UserProfile;
-            setElderData(elderData);
-            setCurrentUserRole('family'); // Treat as family member viewing elder data
-            setFamilyData({ ...elderData, role: 'family', uid: currentUser.uid } as UserProfile);
+            const d0 = elderSnapshot.docs[0];
+            const elder = d0.data() as UserProfile;
+            setElderData({ ...elder, uid: elder.uid || d0.id });
+            setCurrentUserRole('family');
+            setFamilyData({ ...(elder as any), role: 'family', uid: currentUser.uid } as UserProfile);
             setLoading(false);
             return;
           }
-          
-          Alert.alert('Error', 'User profile not found');
-          setLoading(false);
-          return;
         }
-        
-        userData = querySnapshot.docs[0].data() as UserProfile;
-      } else {
-        userData = userDoc.data() as UserProfile;
       }
 
-      setUserProfile(userData);
-      setCurrentUserRole(userData.role);
+      if (!userData) {
+        Alert.alert('Error', 'User profile not found');
+        setLoading(false);
+        return;
+      }
+
+      // Ensure required fields have sensible defaults
+      const normalizedUser: UserProfile = {
+        uid: userData.uid || currentUser.uid,
+        firstName: userData.firstName || '',
+        lastName: userData.lastName || '',
+        phone: userData.phone,
+        age: userData.age,
+        address: userData.address,
+        emergencyContact: userData.emergencyContact,
+        healthStatus: userData.healthStatus,
+        illnesses: userData.illnesses,
+        medicines: userData.medicines || [],
+        role: userData.role,
+        connectedTo: userData.connectedTo,
+      };
+
+      setUserProfile(normalizedUser);
+      setCurrentUserRole(normalizedUser.role);
 
       // Determine elder data based on user role
-      if (userData.role === 'elder') {
+      if (normalizedUser.role === 'elder') {
         // If current user is elder, use their data
-        setElderData(userData);
+        setElderData(normalizedUser);
         
         // Find connected family member
-        if (userData.connectedTo) {
-          const familyDocRef = doc(usersRef, userData.connectedTo);
+        if (normalizedUser.connectedTo) {
+          const familyDocRef = doc(usersRef, normalizedUser.connectedTo);
           const familyDoc = await getDoc(familyDocRef);
           if (familyDoc.exists()) {
-            setFamilyData(familyDoc.data() as UserProfile);
+            const fd = familyDoc.data() as UserProfile;
+            setFamilyData({
+              uid: fd.uid || normalizedUser.connectedTo!,
+              firstName: fd.firstName || '',
+              lastName: fd.lastName || '',
+              phone: fd.phone,
+              age: fd.age,
+              address: fd.address,
+              emergencyContact: fd.emergencyContact,
+              healthStatus: fd.healthStatus,
+              illnesses: fd.illnesses,
+              medicines: fd.medicines || [],
+              role: fd.role,
+              connectedTo: fd.connectedTo,
+            });
           }
         }
-      } else if (userData.role === 'family') {
+      } else if (normalizedUser.role === 'family') {
         // If current user is family member, set as family data and find connected elder
-        setFamilyData(userData);
-        await fetchConnectedElderlyProfiles(userData.uid);
+        setFamilyData(normalizedUser);
+        await fetchConnectedElderlyProfiles(currentUser.uid);
       }
       
       setLoading(false);
@@ -126,7 +190,10 @@ export default function ProfileSettings() {
       const querySnapshot = await getDocs(q);
       
       if (!querySnapshot.empty) {
-        const profiles = querySnapshot.docs.map(doc => doc.data() as UserProfile);
+        const profiles = querySnapshot.docs.map(d => {
+          const data = d.data() as UserProfile;
+          return { ...data, uid: data.uid || d.id } as UserProfile;
+        });
         setElderlyProfiles(profiles);
         
         // Set the first connected elder as the main elder data
@@ -522,7 +589,8 @@ export default function ProfileSettings() {
           {currentUserRole === 'family' && (
             <TouchableOpacity 
               style={[styles.button, styles.editButton]} 
-              onPress={() => handleEditProfile(userProfile)}
+              onPress={() => { if (userProfile) handleEditProfile(userProfile as UserProfile); }}
+              disabled={!userProfile}
             >
               <Ionicons name="create-outline" size={20} color="#fff" />
               <Text style={styles.buttonText}>Edit Your Profile</Text>
