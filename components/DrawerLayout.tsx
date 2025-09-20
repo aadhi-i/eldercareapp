@@ -5,9 +5,10 @@ import * as Speech from 'expo-speech';
 import { signOut } from 'firebase/auth';
 import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import React, { PropsWithChildren, useEffect, useRef, useState } from 'react';
-import { Animated, DeviceEventEmitter, Dimensions, Linking, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, DeviceEventEmitter, Dimensions, Linking, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFallDetection } from '../hooks/useFallDetection';
+import { FallService } from '../lib/fallServiceBridge';
 import { auth, db } from '../lib/firebaseConfig';
 import FallAlertModal from './FallAlertModal';
 import FamilyAlertModal from './FamilyAlertModal';
@@ -127,6 +128,11 @@ export default function DrawerLayout({ children, menuTitle = 'Menu' }: DrawerLay
       const remote = !!d.fallEnabled;
       setFallEnabled(remote);
       DeviceEventEmitter.emit('fallToggleChanged', remote);
+      // Start/stop Android background service for elders
+      if (Platform.OS === 'android') {
+        if (remote) FallService.start(true);
+        else FallService.stop();
+      }
     }, (err) => console.warn('Elder fallEnabled listen error', err));
     return () => unsub();
   }, [userRole]);
@@ -152,6 +158,16 @@ export default function DrawerLayout({ children, menuTitle = 'Menu' }: DrawerLay
         console.warn('Failed to load connected elders', e);
       }
     })();
+  }, [userRole]);
+
+  // Android background service event listener (elder devices)
+  useEffect(() => {
+    if (Platform.OS !== 'android' || userRole !== 'elder') return;
+    const sub = FallService.addListener(() => {
+      // Received a background fall event -> show the same modal
+      setFallModal(true);
+    });
+    return () => sub?.remove?.();
   }, [userRole]);
 
   // Subscribe to alerts for family accounts (simplified query to avoid composite index)
