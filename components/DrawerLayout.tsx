@@ -139,8 +139,8 @@ export default function DrawerLayout({ children, menuTitle = 'Menu' }: DrawerLay
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => navigateTo('/settings')}>
-            <Ionicons name="settings-outline" size={22} color="#d63384" />
-            <Text style={styles.menuItemText}>Settings</Text>
+            <Ionicons name="person-outline" size={22} color="#d63384" />
+            <Text style={styles.menuItemText}>Profile</Text>
           </TouchableOpacity>
 
           <View style={{ flex: 1 }} />

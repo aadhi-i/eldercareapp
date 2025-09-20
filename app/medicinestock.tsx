@@ -187,7 +187,7 @@ export default function MedicineStockScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 24, backgroundColor: '#fff', flexGrow: 1 },
+  container: { padding: 20, paddingTop: 80, backgroundColor: '#fff', flexGrow: 1 },
   title: { fontSize: 24, fontWeight: '700', color: '#d63384', marginBottom: 12 },
   emptyCard: { backgroundColor: 'rgba(255, 192, 203, 0.15)', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: 'rgba(255, 192, 203, 0.3)' },
   emptyText: { color: '#666', fontSize: 16 },

@@ -3,19 +3,19 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { addDoc, collection, deleteDoc, doc, DocumentData, getDocs, query, QueryDocumentSnapshot, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  FlatList,
-  LayoutAnimation,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  UIManager,
-  View,
+    Alert,
+    Animated,
+    FlatList,
+    LayoutAnimation,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    UIManager,
+    View,
 } from 'react-native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { useAuth } from '../components/AuthProvider';
@@ -414,7 +414,7 @@ export default function MedicationScreen() {
 const styles = StyleSheet.create({
   container: {
     padding: 20,
-    paddingTop: 24,
+    paddingTop: 80,
     backgroundColor: '#fff',
     flexGrow: 1,
   },

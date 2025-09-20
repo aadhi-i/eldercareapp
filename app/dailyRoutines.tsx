@@ -212,7 +212,7 @@ export default function DailyRoutinesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 24, backgroundColor: '#fff', flexGrow: 1 },
+  container: { padding: 20, paddingTop: 80, backgroundColor: '#fff', flexGrow: 1 },
   containerEmpty: { justifyContent: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   headerTitle: { fontSize: 24, fontWeight: '700', color: '#d63384' },

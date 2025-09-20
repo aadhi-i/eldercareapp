@@ -1,6 +1,7 @@
+import { Ionicons } from '@expo/vector-icons';
+import { collection, doc, getDoc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { collection, doc, getDoc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { auth, db } from '../lib/firebaseConfig';
 
 interface Medicine {
@@ -31,6 +32,9 @@ export default function ProfileSettings() {
   const [elderlyProfiles, setElderlyProfiles] = useState<UserProfile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
   const [editMode, setEditMode] = useState(false);
+  const [currentUserRole, setCurrentUserRole] = useState<string>('');
+  const [elderData, setElderData] = useState<UserProfile | null>(null);
+  const [familyData, setFamilyData] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     fetchUserProfile();
@@ -52,32 +56,59 @@ export default function ProfileSettings() {
       const userDocRef = doc(usersRef, currentUser.uid);
       const userDoc = await getDoc(userDocRef);
       
+      let userData: UserProfile | null = null;
+      
       if (!userDoc.exists()) {
         // Try to find user by phone number
         const q = query(usersRef, where('phone', '==', currentUser.phoneNumber));
         const querySnapshot = await getDocs(q);
         
         if (querySnapshot.empty) {
+          // If no user found by UID or phone, try to find any elder connected to this family member
+          // This handles the case where an elder was created without proper authentication
+          const elderQuery = query(usersRef, where('connectedTo', '==', currentUser.uid));
+          const elderSnapshot = await getDocs(elderQuery);
+          
+          if (!elderSnapshot.empty) {
+            // Found connected elder, use their data
+            const elderData = elderSnapshot.docs[0].data() as UserProfile;
+            setElderData(elderData);
+            setCurrentUserRole('family'); // Treat as family member viewing elder data
+            setFamilyData({ ...elderData, role: 'family', uid: currentUser.uid } as UserProfile);
+            setLoading(false);
+            return;
+          }
+          
           Alert.alert('Error', 'User profile not found');
           setLoading(false);
           return;
         }
         
-        const userData = querySnapshot.docs[0].data() as UserProfile;
-        setUserProfile(userData);
-        
-        // If this is a family member, fetch connected elderly profiles
-        if (userData.role === 'family') {
-          await fetchConnectedElderlyProfiles(userData.uid);
-        }
+        userData = querySnapshot.docs[0].data() as UserProfile;
       } else {
-        const userData = userDoc.data() as UserProfile;
-        setUserProfile(userData);
+        userData = userDoc.data() as UserProfile;
+      }
+
+      setUserProfile(userData);
+      setCurrentUserRole(userData.role);
+
+      // Determine elder data based on user role
+      if (userData.role === 'elder') {
+        // If current user is elder, use their data
+        setElderData(userData);
         
-        // If this is a family member, fetch connected elderly profiles
-        if (userData.role === 'family') {
-          await fetchConnectedElderlyProfiles(userData.uid);
+        // Find connected family member
+        if (userData.connectedTo) {
+          const familyDocRef = doc(usersRef, userData.connectedTo);
+          const familyDoc = await getDoc(familyDocRef);
+          if (familyDoc.exists()) {
+            setFamilyData(familyDoc.data() as UserProfile);
+          }
         }
+      } else if (userData.role === 'family') {
+        // If current user is family member, set as family data and find connected elder
+        setFamilyData(userData);
+        await fetchConnectedElderlyProfiles(userData.uid);
       }
       
       setLoading(false);
@@ -97,12 +128,24 @@ export default function ProfileSettings() {
       if (!querySnapshot.empty) {
         const profiles = querySnapshot.docs.map(doc => doc.data() as UserProfile);
         setElderlyProfiles(profiles);
+        
+        // Set the first connected elder as the main elder data
+        if (profiles.length > 0) {
+          setElderData(profiles[0]);
+        }
       }
     } catch (error) {
       console.error('Error fetching connected profiles:', error);
       Alert.alert('Error', 'Failed to load connected profiles');
     }
   };
+
+  // Update elder data when elderly profiles change
+  useEffect(() => {
+    if (elderlyProfiles.length > 0 && currentUserRole === 'family' && !elderData) {
+      setElderData(elderlyProfiles[0]);
+    }
+  }, [elderlyProfiles, currentUserRole, elderData]);
 
   const handleEditProfile = (profile: UserProfile) => {
     setSelectedProfile(profile);
@@ -306,61 +349,198 @@ export default function ProfileSettings() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {userProfile && (
+      {/* Elder Profile Display - Always show elder data for both users */}
+      {elderData && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Profile</Text>
-          <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>{userProfile.firstName} {userProfile.lastName}</Text>
-            <Text style={styles.profileDetail}>Role: {userProfile.role === 'family' ? 'Family Member' : userProfile.role === 'elder' ? 'Elder' : 'Caregiver'}</Text>
-            {userProfile.phone && <Text style={styles.profileDetail}>Phone: {userProfile.phone}</Text>}
-            {userProfile.age && <Text style={styles.profileDetail}>Age: {userProfile.age}</Text>}
-            {userProfile.address && <Text style={styles.profileDetail}>Address: {userProfile.address}</Text>}
-            {userProfile.emergencyContact && <Text style={styles.profileDetail}>Emergency Contact: {userProfile.emergencyContact}</Text>}
-            {userProfile.role === 'elder' && (
-              <>
-                {userProfile.healthStatus && <Text style={styles.profileDetail}>Health Status: {userProfile.healthStatus}</Text>}
-                {userProfile.illnesses && <Text style={styles.profileDetail}>Illnesses: {userProfile.illnesses}</Text>}
-              </>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>👤 Elder Profile</Text>
+            {currentUserRole === 'family' && (
+              <TouchableOpacity 
+                style={styles.editButton} 
+                onPress={() => handleEditProfile(elderData)}
+              >
+                <Ionicons name="create-outline" size={24} color="#fff" />
+              </TouchableOpacity>
             )}
           </View>
-          <TouchableOpacity 
-            style={[styles.button, styles.editButton]} 
-            onPress={() => handleEditProfile(userProfile)}
-          >
-            <Text style={styles.buttonText}>Edit Profile</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      
-      {userProfile?.role === 'family' && elderlyProfiles.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Connected Elderly Profiles</Text>
-          {elderlyProfiles.map((profile, index) => (
-            <View key={profile.uid} style={[styles.profileInfo, index > 0 && styles.profileDivider]}>
-              <Text style={styles.profileName}>{profile.firstName} {profile.lastName}</Text>
-              <Text style={styles.profileDetail}>Role: {profile.role === 'elder' ? 'Elder' : 'Caregiver'}</Text>
-              {profile.phone && <Text style={styles.profileDetail}>Phone: {profile.phone}</Text>}
-              {profile.age && <Text style={styles.profileDetail}>Age: {profile.age}</Text>}
-              {profile.address && <Text style={styles.profileDetail}>Address: {profile.address}</Text>}
-              {profile.emergencyContact && <Text style={styles.profileDetail}>Emergency Contact: {profile.emergencyContact}</Text>}
-              {profile.healthStatus && <Text style={styles.profileDetail}>Health Status: {profile.healthStatus}</Text>}
-              {profile.illnesses && <Text style={styles.profileDetail}>Illnesses: {profile.illnesses}</Text>}
-              
-              <TouchableOpacity 
-                style={[styles.button, styles.editButton, styles.smallButton]} 
-                onPress={() => handleEditProfile(profile)}
-              >
-                <Text style={styles.buttonText}>Edit Profile</Text>
-              </TouchableOpacity>
+          
+          {/* Basic Information */}
+          <View style={styles.infoSection}>
+            <Text style={styles.infoSectionTitle}>Basic Information</Text>
+            
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Name:</Text>
+              <Text style={styles.infoValue}>{elderData.firstName} {elderData.lastName}</Text>
             </View>
-          ))}
+            
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Age:</Text>
+              <Text style={styles.infoValue}>{elderData.age || 'Not specified'}</Text>
+            </View>
+            
+            {elderData.phone && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Phone:</Text>
+                <Text style={styles.infoValue}>{elderData.phone}</Text>
+              </View>
+            )}
+            
+            {elderData.address && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Address:</Text>
+                <Text style={styles.infoValue}>{elderData.address}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Health Information */}
+          {(elderData.healthStatus || elderData.illnesses) && (
+            <View style={styles.infoSection}>
+              <Text style={styles.infoSectionTitle}>Health Information</Text>
+              
+              {elderData.healthStatus && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Health Status:</Text>
+                  <Text style={styles.infoValue}>{elderData.healthStatus}</Text>
+                </View>
+              )}
+              
+              {elderData.illnesses && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Medical Conditions:</Text>
+                  <Text style={styles.infoValue}>{elderData.illnesses}</Text>
+                </View>
+              )}
+            </View>
+          )}
+          
+          {currentUserRole === 'elder' && (
+            <View style={styles.readOnlyNotice}>
+              <Text style={styles.readOnlyText}>
+                📖 This is your profile. Contact your family member to make changes.
+              </Text>
+            </View>
+          )}
         </View>
       )}
-      
-      {userProfile?.role === 'family' && elderlyProfiles.length === 0 && (
+
+      {/* All Medications Section */}
+      {elderData && elderData.medicines && elderData.medicines.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Connected Elderly Profiles</Text>
-          <Text style={styles.emptyText}>No connected elderly profiles found.</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>💊 All Medications</Text>
+            {currentUserRole === 'family' && (
+              <TouchableOpacity 
+                style={styles.editButton} 
+                onPress={() => {
+                  Alert.alert('Edit Medications', 'Medication editing will be available in the medication management section');
+                }}
+              >
+                <Ionicons name="create-outline" size={24} color="#fff" />
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          <View style={styles.medicationsSection}>
+            {elderData.medicines.map((med, index) => (
+              <View key={index} style={styles.medicationItem}>
+                <Text style={styles.medicationName}>{med.name}</Text>
+                <View style={styles.medicationDetailsContainer}>
+                  <Text style={styles.medicationDetails}>
+                    <Text style={styles.medicationLabel}>Dosage:</Text> {med.dosage}
+                  </Text>
+                  {med.timings && med.timings.length > 0 && (
+                    <Text style={styles.medicationDetails}>
+                      <Text style={styles.medicationLabel}>Times:</Text> {med.timings.join(', ')}
+                    </Text>
+                  )}
+                  {med.stock && (
+                    <Text style={styles.medicationDetails}>
+                      <Text style={styles.medicationLabel}>Stock:</Text> {med.stock} days remaining
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ))}
+          </View>
+          
+          {currentUserRole === 'elder' && (
+            <View style={styles.readOnlyNotice}>
+              <Text style={styles.readOnlyText}>
+                📖 Contact your family member to update medications.
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Emergency Contact Section */}
+      {elderData && elderData.emergencyContact && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>🚨 Emergency Contact</Text>
+            {currentUserRole === 'family' && (
+              <TouchableOpacity 
+                style={styles.editButton} 
+                onPress={() => handleEditProfile(elderData)}
+              >
+                <Ionicons name="create-outline" size={24} color="#fff" />
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          <View style={styles.emergencyContactSection}>
+            <Text style={styles.emergencyContactLabel}>Emergency Contact Number:</Text>
+            <Text style={styles.emergencyContactNumber}>{elderData.emergencyContact}</Text>
+            <Text style={styles.emergencyContactNote}>
+              This is the primary emergency contact number for {elderData.firstName}
+            </Text>
+          </View>
+          
+          {currentUserRole === 'elder' && (
+            <View style={styles.readOnlyNotice}>
+              <Text style={styles.readOnlyText}>
+                📖 Contact your family member to update emergency contact.
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Family Member Details */}
+      {familyData && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>👨‍👩‍👧‍👦 Family Member Details</Text>
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{familyData.firstName} {familyData.lastName}</Text>
+            <Text style={styles.profileDetail}>Role: Family Member</Text>
+            {familyData.phone && <Text style={styles.profileDetail}>Phone: {familyData.phone}</Text>}
+            {familyData.age && <Text style={styles.profileDetail}>Age: {familyData.age}</Text>}
+            {familyData.address && <Text style={styles.profileDetail}>Address: {familyData.address}</Text>}
+          </View>
+          
+          {currentUserRole === 'family' && (
+            <TouchableOpacity 
+              style={[styles.button, styles.editButton]} 
+              onPress={() => handleEditProfile(userProfile)}
+            >
+              <Ionicons name="create-outline" size={20} color="#fff" />
+              <Text style={styles.buttonText}>Edit Your Profile</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* No Data State */}
+      {!elderData && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>No Profile Data</Text>
+          <Text style={styles.emptyText}>
+            {currentUserRole === 'family' 
+              ? 'No connected elder profile found. Please connect with an elder using the connection code.'
+              : 'No profile data found. Please complete your profile setup.'
+            }
+          </Text>
         </View>
       )}
     </ScrollView>
@@ -369,8 +549,10 @@ export default function ProfileSettings() {
 
 const styles = StyleSheet.create({
   container: {
-    padding: 20,
+    padding: 24,
+    paddingTop: 80,
     paddingBottom: 40,
+    backgroundColor: '#f8f9fa',
   },
   loadingContainer: {
     flex: 1,
@@ -379,22 +561,33 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 10,
-    fontSize: 16,
+    fontSize: 18,
     color: '#666',
   },
   section: {
-    backgroundColor: 'rgba(255, 192, 203, 0.15)',
+    backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 16,
+    padding: 20,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 192, 203, 0.3)',
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 26,
     fontWeight: '700',
     color: '#d63384',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   profileInfo: {
     marginBottom: 16,
@@ -406,61 +599,192 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   profileName: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 12,
+  },
+  profileDetail: {
     fontSize: 18,
+    color: '#555',
+    marginBottom: 8,
+    lineHeight: 26,
+  },
+  infoSection: {
+    marginBottom: 20,
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  infoSectionTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#d63384',
+    marginBottom: 18,
+    borderBottomWidth: 2,
+    borderBottomColor: '#d63384',
+    paddingBottom: 10,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    alignItems: 'flex-start',
+  },
+  infoLabel: {
+    fontSize: 20,
     fontWeight: '600',
+    color: '#333',
+    width: 140,
+    marginRight: 16,
+  },
+  infoValue: {
+    fontSize: 20,
+    color: '#555',
+    flex: 1,
+    lineHeight: 28,
+  },
+  medicationsSection: {
+    marginTop: 16,
+  },
+  medicationsTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#d63384',
+    marginBottom: 12,
+  },
+  medicationItem: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#d63384',
+  },
+  medicationName: {
+    fontSize: 22,
+    fontWeight: '700',
     color: '#333',
     marginBottom: 8,
   },
-  profileDetail: {
+  medicationDetailsContainer: {
+    marginTop: 4,
+  },
+  medicationDetails: {
+    fontSize: 20,
+    color: '#666',
+    marginBottom: 6,
+    lineHeight: 26,
+  },
+  medicationLabel: {
+    fontWeight: '600',
+    color: '#333',
+  },
+  emergencyContactSection: {
+    backgroundColor: '#fff5f5',
+    padding: 20,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#dc3545',
+    alignItems: 'center',
+  },
+  emergencyContactLabel: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  emergencyContactNumber: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#dc3545',
+    marginBottom: 14,
+    textAlign: 'center',
+  },
+  emergencyContactNote: {
+    fontSize: 18,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 26,
+  },
+  readOnlyNotice: {
+    backgroundColor: '#e3f2fd',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196f3',
+    marginTop: 12,
+  },
+  readOnlyText: {
+    fontSize: 18,
+    color: '#1976d2',
+    fontWeight: '500',
+  },
+  editButton: {
+    backgroundColor: '#d63384',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+    shadowColor: '#d63384',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editButtonText: {
+    color: '#fff',
     fontSize: 16,
-    color: '#555',
-    marginBottom: 4,
+    fontWeight: '700',
   },
   emptyText: {
-    fontSize: 16,
+    fontSize: 20,
     color: '#888',
     fontStyle: 'italic',
+    textAlign: 'center',
+    lineHeight: 28,
   },
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   label: {
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 20,
+    fontWeight: '600',
     color: '#333',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   input: {
     backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.1)',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    padding: 18,
+    fontSize: 20,
     color: '#333',
   },
   helperText: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#888',
-    marginTop: 4,
+    marginTop: 6,
   },
   buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 16,
+    marginTop: 20,
   },
   button: {
-    borderRadius: 8,
-    padding: 14,
+    borderRadius: 12,
+    padding: 16,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
+    flexDirection: 'row',
   },
   smallButton: {
-    padding: 10,
-  },
-  editButton: {
-    backgroundColor: '#d63384',
+    padding: 12,
   },
   saveButton: {
     backgroundColor: '#28a745',
@@ -477,7 +801,8 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '600',
+    marginLeft: 8,
   },
 });
