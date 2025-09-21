@@ -18,7 +18,7 @@
     },
     "android": {
       "package": "com.adithyasnair.eldercare",
-        "permissions": ["RECORD_AUDIO", "POST_NOTIFICATIONS"],
+        "permissions": ["RECORD_AUDIO", "POST_NOTIFICATIONS", "CAMERA"],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -33,6 +33,17 @@
     "plugins": [
       "expo-router",
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 24,
+            "kotlinVersion": "2.0.21"
+          }
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
@@ -41,8 +52,7 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-web-browser",
-      "expo-barcode-scanner",
+  "expo-web-browser",
       "./plugins/with-android-fall-service"
     ],
     "experiments": {

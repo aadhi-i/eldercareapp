@@ -4,20 +4,20 @@ import { router } from 'expo-router';
 import { signInWithPhoneNumber } from 'firebase/auth';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import CountryPicker, {
-  Country,
-  CountryCode,
+    Country,
+    CountryCode,
 } from 'react-native-country-picker-modal';
 import { useAuth } from '../components/AuthProvider';
 import { auth, firebaseConfig } from '../lib/firebaseConfig';
@@ -28,7 +28,7 @@ export default function SignupScreen() {
   const [countryCode, setCountryCode] = useState<CountryCode>('IN');
   const [country, setCountry] = useState<Country | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
-  const recaptchaVerifier = useRef(null);
+  const recaptchaVerifier = useRef<any>(null);
   
   // Check if user is already authenticated and redirect to dashboard
   useEffect(() => {
@@ -54,7 +54,7 @@ export default function SignupScreen() {
       const confirmation = await signInWithPhoneNumber(
         auth,
         fullPhone,
-        recaptchaVerifier.current!
+        recaptchaVerifier.current
       );
 
       router.push({
@@ -89,7 +89,7 @@ export default function SignupScreen() {
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
         <FirebaseRecaptchaVerifierModal
           ref={recaptchaVerifier}
-          firebaseConfig={firebaseConfig}
+          firebaseConfig={firebaseConfig as any}
           attemptInvisibleVerification
         />
 

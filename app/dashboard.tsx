@@ -33,6 +33,7 @@ export default function Dashboard() {
   const [medications, setMedications] = useState<any[]>([]);
   const [routines, setRoutines] = useState<any[]>([]);
   const [upcomingMedications, setUpcomingMedications] = useState<any[]>([]);
+  const [upcomingRoutines, setUpcomingRoutines] = useState<any[]>([]);
   const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
 
   // Voice/TTS state
@@ -146,11 +147,11 @@ export default function Dashboard() {
             }
           }
 
-          // Fetch shared data (medications, routines) for the elder profile
+          // Fetch Firestore-backed data (medications, routines, stock) for the elder profile
           if (elderProfileData) {
-            await fetchSharedMedicationsAndRoutines(elderProfileData);
-            await fetchUpcomingMedications(elderProfileData);
-            await fetchLowStockAlerts(elderProfileData);
+            const elderUid = elderProfileData.uid || elderProfileData.id;
+            const familyUid = elderProfileData.connectedTo || familyData?.uid || familyData?.id;
+            await loadDashboardCollections(elderUid, familyUid);
 
             // Schedule reminders for the elder profile
             if (currentUserData.role === 'elder') {
@@ -318,86 +319,115 @@ export default function Dashboard() {
     }
   };
 
-  const fetchSharedMedicationsAndRoutines = async (elderData: any) => {
+  // Load medicines, routines, and stocks from Firestore for elder (and connected family if any)
+  const loadDashboardCollections = async (elderUid?: string, familyUid?: string) => {
     try {
-      // Fetch medications from elder's personal medicines
-      if (elderData.medicines && elderData.medicines.length > 0) {
-        setMedications(elderData.medicines);
+      const uids: string[] = [];
+      if (elderUid) uids.push(String(elderUid));
+      if (familyUid && familyUid !== elderUid) uids.push(String(familyUid));
+
+      // Load medicines
+      const meds: any[] = [];
+      for (const uid of uids.length ? uids : ['']) {
+        if (!uid) continue;
+        const medsRef = collection(db, 'medicines');
+        const snap = await getDocs(query(medsRef, where('uid', '==', uid)));
+        snap.docs.forEach((d) => meds.push({ id: d.id, ...(d.data() as any) }));
       }
+      setMedications(meds);
 
-      // Fetch routines from family member's account
-      if (elderData.connectedTo) {
-        const routinesRef = collection(db, 'dailyRoutines');
-        const routinesSnap = await getDocs(query(routinesRef, where('uid', '==', elderData.connectedTo)));
-        setRoutines(routinesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+      // Load routines
+      const routs: any[] = [];
+      for (const uid of uids.length ? uids : ['']) {
+        if (!uid) continue;
+        const routRef = collection(db, 'dailyRoutines');
+        const rsnap = await getDocs(query(routRef, where('uid', '==', uid)));
+        rsnap.docs.forEach((d) => routs.push({ id: d.id, ...(d.data() as any) }));
       }
-    } catch (error) {
-      console.error('Error fetching medications and routines:', error);
-    }
-  };
+      setRoutines(routs);
 
-  const fetchUpcomingMedications = async (elderData: any) => {
-    try {
-      const today = new Date();
-      const upcomingMeds: any[] = [];
-
-      // Check elder's personal medicines
-      if (elderData.medicines && elderData.medicines.length > 0) {
-        elderData.medicines.forEach((med: any) => {
-          if (med.timings && Array.isArray(med.timings)) {
-            med.timings.forEach((time: string) => {
-              const [timeStr, period] = time.split(' ');
-              const [hours, minutes] = timeStr.split(':');
-              let hour24 = parseInt(hours);
-              
-              if (period === 'PM' && hour24 !== 12) hour24 += 12;
-              if (period === 'AM' && hour24 === 12) hour24 = 0;
-              
-              const medTime = new Date();
-              medTime.setHours(hour24, parseInt(minutes), 0, 0);
-              
-              if (medTime > today) {
-                upcomingMeds.push({
-                  name: med.name,
-                  dosage: med.dosage,
-                  time: time,
-                  timeObj: medTime,
-                  type: 'personal'
-                });
-              }
-            });
+      // Load stocks map by medicineId
+      const stocks: Record<string, any> = {};
+      for (const uid of uids.length ? uids : ['']) {
+        if (!uid) continue;
+        const stRef = collection(db, 'medicineStocks');
+        const ssnap = await getDocs(query(stRef, where('uid', '==', uid)));
+        ssnap.docs.forEach((d) => {
+          const data = { id: d.id, ...(d.data() as any) };
+          const mid = data.medicineId;
+          // If duplicate medicineIds from multiple uids, prefer the one with newer lastDecrementDate
+          const prev = stocks[mid];
+          if (!prev || (Number(data.lastDecrementDate || 0) > Number(prev.lastDecrementDate || 0))) {
+            stocks[mid] = data;
           }
         });
       }
 
-      // Sort by time
-      upcomingMeds.sort((a, b) => a.timeObj.getTime() - b.timeObj.getTime());
-      setUpcomingMedications(upcomingMeds.slice(0, 5)); // Show next 5 medications
-    } catch (error) {
-      console.error('Error fetching upcoming medications:', error);
-    }
-  };
-
-  const fetchLowStockAlerts = async (elderData: any) => {
-    try {
-      const alerts: any[] = [];
-      
-      // Check elder's personal medicines for low stock
-      if (elderData.medicines && elderData.medicines.length > 0) {
-        elderData.medicines.forEach((med: any) => {
-          if (med.stock && med.stock <= 7) { // Alert if stock is 7 days or less
-            alerts.push({
-              name: med.name,
-              stock: med.stock,
-              type: 'personal'
+      // Compute upcoming medications: soonest today across all meds
+      const now = new Date();
+      const upcomingMedList: any[] = [];
+      meds.forEach((m) => {
+        const times = Array.isArray(m?.times) ? m.times : [];
+        times.forEach((t: any) => {
+          const h12 = Number(t?.hour ?? 0);
+          const mins = Number(t?.minute ?? 0);
+          const period = String(t?.period || '').toUpperCase();
+          let h24 = h12 % 12;
+          if (period === 'PM') h24 += 12;
+          const dt = new Date();
+          dt.setHours(h24, mins, 0, 0);
+          if (dt > now) {
+            upcomingMedList.push({
+              name: m.name,
+              dosage: m.dosage,
+              time: `${String(h12).padStart(2, '0')}:${String(mins).padStart(2, '0')} ${period || (h24 >= 12 ? 'PM' : 'AM')}`,
+              timeObj: dt,
             });
           }
         });
-      }
+      });
+      upcomingMedList.sort((a, b) => a.timeObj.getTime() - b.timeObj.getTime());
+      setUpcomingMedications(upcomingMedList.slice(0, 3));
 
-      setLowStockAlerts(alerts);
+      // Compute upcoming routines: soonest today across all routines
+      const upcomingRoutList: any[] = [];
+      routs.forEach((r) => {
+        const times = Array.isArray(r?.times) ? r.times : [];
+        times.forEach((t: any) => {
+          const h12 = Number(t?.hour ?? 0);
+          const mins = Number(t?.minute ?? 0);
+          const period = String(t?.period || '').toUpperCase();
+          let h24 = h12 % 12;
+          if (period === 'PM') h24 += 12;
+          const dt = new Date();
+          dt.setHours(h24, mins, 0, 0);
+          if (dt > now) {
+            upcomingRoutList.push({
+              title: r.title,
+              time: `${String(h12).padStart(2, '0')}:${String(mins).padStart(2, '0')} ${period || (h24 >= 12 ? 'PM' : 'AM')}`,
+              timeObj: dt,
+            });
+          }
+        });
+      });
+      upcomingRoutList.sort((a, b) => a.timeObj.getTime() - b.timeObj.getTime());
+      setUpcomingRoutines(upcomingRoutList.slice(0, 3));
+
+      // Compute low stock: by days left ascending using medicines' frequency
+      const low: any[] = [];
+      meds.forEach((m) => {
+        const timesPerDay = Array.isArray(m?.times) ? m.times.length : 0;
+        const st = stocks[m.id];
+        if (!st) return;
+        if (timesPerDay <= 0) return;
+        const qty = Number(st.quantity || 0);
+        const daysLeft = Math.floor(qty / Math.max(1, timesPerDay));
+        low.push({ name: m.name, stock: daysLeft, quantity: qty, timesPerDay });
+      });
+      low.sort((a, b) => a.stock - b.stock);
+      setLowStockAlerts(low.slice(0, 3));
     } catch (error) {
-      console.error('Error fetching low stock alerts:', error);
+      console.error('Error loading dashboard collections:', error);
     }
   };
 
@@ -595,15 +625,11 @@ export default function Dashboard() {
         {/* 2. Upcoming Routines - Max 3 items */}
         <View style={styles.cardWhite}>
           <Text style={styles.cardTitle}>📅 Upcoming Routines</Text>
-          {routines.length > 0 ? (
-            routines.slice(0, 3).map((routine, index) => (
+          {upcomingRoutines.length > 0 ? (
+            upcomingRoutines.map((routine, index) => (
               <View key={index} style={styles.routineItem}>
                 <Text style={styles.routineTitle}>{routine.title}</Text>
-                {routine.times && routine.times.length > 0 && (
-                  <Text style={styles.routineTime}>
-                    {routine.times.map((t: any) => formatTime(t)).join(', ')}
-                  </Text>
-                )}
+                <Text style={styles.routineTime}>{routine.time}</Text>
               </View>
             ))
           ) : (
@@ -615,7 +641,7 @@ export default function Dashboard() {
         <View style={[styles.cardWhite, styles.alertCard]}>
           <Text style={styles.cardTitle}>⚠️ Medication Stock Updates</Text>
           {lowStockAlerts.length > 0 ? (
-            lowStockAlerts.slice(0, 3).map((alert, index) => (
+            lowStockAlerts.map((alert, index) => (
               <View key={index} style={styles.alertItem}>
                 <Text style={styles.alertText}>
                   {alert.name} - Only {alert.stock} days left

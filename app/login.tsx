@@ -29,7 +29,7 @@ export default function LoginScreen() {
   const [countryCode, setCountryCode] = useState<CountryCode>('IN');
   const [country, setCountry] = useState<Country | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
-  const recaptchaVerifier = useRef(null);
+  const recaptchaVerifier = useRef<any>(null);
   
   // Check if user is already authenticated and redirect to dashboard
   useEffect(() => {
@@ -55,7 +55,7 @@ export default function LoginScreen() {
       const confirmation = await signInWithPhoneNumber(
         auth,
         fullPhone,
-        recaptchaVerifier.current!
+        recaptchaVerifier.current
       );
 
       router.push({
@@ -90,7 +90,7 @@ export default function LoginScreen() {
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
         <FirebaseRecaptchaVerifierModal
           ref={recaptchaVerifier}
-          firebaseConfig={firebaseConfig}
+          firebaseConfig={firebaseConfig as any}
           attemptInvisibleVerification
         />
 

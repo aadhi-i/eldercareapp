@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { addDoc, collection, deleteDoc, doc, DocumentData, getDocs, query, QueryDocumentSnapshot, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, DocumentData, getDoc, getDocs, onSnapshot, query, QueryDocumentSnapshot, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import { Alert, FlatList, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
@@ -26,6 +26,10 @@ export default function DailyRoutinesScreen() {
   const { user } = useAuth();
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [dataOwnerUid, setDataOwnerUid] = useState<string | null>(null);
+  const [isResolvingOwner, setIsResolvingOwner] = useState<boolean>(false);
+  const [managingFor, setManagingFor] = useState<string | null>(null);
+  const [currentRole, setCurrentRole] = useState<'elder' | 'family' | null>(null);
   const [showAdd, setShowAdd] = useState<boolean>(false);
   const [current, setCurrent] = useState<Partial<Routine>>({ title: '', notes: '', times: [] });
   const [timeDate, setTimeDate] = useState<Date>(() => {
@@ -39,36 +43,148 @@ export default function DailyRoutinesScreen() {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   }
 
+  // Resolve data owner uid based on role
   useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      if (!user) { setRoutines([]); return; }
+    const resolveOwner = async () => {
+      setIsResolvingOwner(true);
+      setDataOwnerUid(null);
+      if (!user) { setIsResolvingOwner(false); return; }
       try {
-        setIsLoading(true);
-        const ref = collection(db, 'dailyRoutines');
-        const qRef = query(ref, where('uid', '==', user.uid));
-        const snap = await getDocs(qRef);
-        const items: Routine[] = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
-          const data = d.data() as any;
-          const times: RoutineTime[] = Array.isArray(data?.times) ? data.times.map((t: any, idx: number) => ({
-            id: t?.id ?? `${d.id}-t${idx}`,
-            hour: Number(t?.hour ?? 0),
-            minute: Number(t?.minute ?? 0),
-            period: (t?.period === 'PM' ? 'PM' : 'AM') as 'AM' | 'PM',
-          })) : [];
-          return { id: d.id, title: String(data?.title ?? ''), notes: String(data?.notes ?? ''), times };
-        });
-        if (alive) setRoutines(items);
+        const uref = doc(collection(db, 'users'), user.uid);
+        const udoc = await getDoc(uref);
+        if (!udoc.exists()) { setDataOwnerUid(user.uid); return; }
+        const u = udoc.data() as any;
+  const role = (u?.role || 'elder') as 'elder' | 'family';
+  setCurrentRole(role);
+  if (role === 'elder') { setDataOwnerUid(user.uid); setManagingFor(null); return; }
+        const connectedElders: string[] = Array.isArray(u?.connectedElders) ? u.connectedElders : [];
+        if (connectedElders.length > 0) {
+          const owner = connectedElders[0];
+          setDataOwnerUid(owner);
+          try {
+            const oDoc = await getDoc(doc(collection(db, 'users'), owner));
+            if (oDoc.exists()) {
+              const od = oDoc.data() as any;
+              const name = `${od?.firstName || ''} ${od?.lastName || ''}`.trim() || od?.phone || owner;
+              setManagingFor(name);
+            }
+          } catch {}
+          return;
+        }
+        const esnap = await getDocs(query(collection(db, 'users'), where('connectedTo', '==', user.uid)));
+        if (!esnap.empty) {
+          const owner = esnap.docs[0].id;
+          setDataOwnerUid(owner);
+          try {
+            const od = esnap.docs[0].data() as any;
+            const name = `${od?.firstName || ''} ${od?.lastName || ''}`.trim() || od?.phone || owner;
+            setManagingFor(name);
+          } catch {}
+          return;
+        }
+        setDataOwnerUid(user.uid);
+        setManagingFor(null);
+        setCurrentRole(role);
       } catch (e) {
-        console.error('Failed to load routines', e);
-        if (alive) setRoutines([]);
+        console.error('Failed to resolve routines owner', e);
+  setDataOwnerUid(user?.uid ?? null);
+  setManagingFor(null);
+  setCurrentRole(null);
       } finally {
-        if (alive) setIsLoading(false);
+        setIsResolvingOwner(false);
       }
     };
-    load();
-    return () => { alive = false; };
+    resolveOwner();
   }, [user]);
+
+  // Subscribe to routines for owner uid
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    setIsLoading(true);
+    setRoutines([]);
+    if (!dataOwnerUid) { setIsLoading(false); return; }
+    try {
+      const uids = currentRole === 'family' && user?.uid && user.uid !== dataOwnerUid ? [dataOwnerUid, user.uid] : [dataOwnerUid];
+      const ref = uids.length > 1
+        ? query(collection(db, 'dailyRoutines'), where('uid', 'in', uids as string[]))
+        : query(collection(db, 'dailyRoutines'), where('uid', '==', uids[0]!));
+      unsubscribe = onSnapshot(
+        ref,
+        (snap) => {
+          const items: Routine[] = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
+            const data = d.data() as any;
+            const times: RoutineTime[] = Array.isArray(data?.times) ? data.times.map((t: any, idx: number) => ({
+              id: t?.id ?? `${d.id}-t${idx}`,
+              hour: Number(t?.hour ?? 0),
+              minute: Number(t?.minute ?? 0),
+              period: (t?.period === 'PM' ? 'PM' : 'AM') as 'AM' | 'PM',
+            })) : [];
+            return { id: d.id, title: String(data?.title ?? ''), notes: String(data?.notes ?? ''), times };
+          });
+          if (items.length === 0) {
+            attemptMigrateLegacyRoutines(dataOwnerUid).finally(() => {
+              setRoutines(items);
+              setIsLoading(false);
+            });
+          } else {
+            setRoutines(items);
+            setIsLoading(false);
+          }
+        },
+        (error) => {
+          console.error('Failed to subscribe routines', error);
+          setRoutines([]);
+          setIsLoading(false);
+        }
+      );
+    } catch (e) {
+      console.error('Failed to init routines listener', e);
+      setIsLoading(false);
+    }
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, [dataOwnerUid, user, currentRole]);
+
+  const parseLegacyTimeString = (s: string): RoutineTime | null => {
+    try {
+      const m = s.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+      if (!m) return null;
+      const h12 = Math.min(12, Math.max(1, parseInt(m[1], 10)));
+      const minute = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+      const period = m[3].toUpperCase() === 'PM' ? 'PM' : 'AM';
+      return { id: `${Date.now()}-${h12}-${minute}-${period}`, hour: h12, minute, period };
+    } catch { return null; }
+  };
+
+  const attemptMigrateLegacyRoutines = async (ownerUid: string | null) => {
+    if (!ownerUid) return;
+    try {
+      const uref = doc(collection(db, 'users'), ownerUid);
+      const udoc = await getDoc(uref);
+      if (!udoc.exists()) return;
+      const u = udoc.data() as any;
+      if (u?.routinesMigratedAt) return;
+      const legacy: any[] = Array.isArray(u?.dailyRoutines) ? u.dailyRoutines : [];
+      if (!legacy.length) return;
+      for (const lr of legacy) {
+        const title = String(lr?.title ?? '').trim();
+        if (!title) continue;
+        const timesArr: RoutineTime[] = Array.isArray(lr?.timings)
+          ? lr.timings.map((t: any) => (typeof t === 'string' ? parseLegacyTimeString(t) : null)).filter(Boolean) as RoutineTime[]
+          : [];
+        await addDoc(collection(db, 'dailyRoutines'), {
+          uid: ownerUid,
+          title,
+          notes: String(lr?.notes ?? ''),
+          times: timesArr.map(t => ({ id: t.id, hour: t.hour, minute: t.minute, period: t.period })),
+          createdAt: Date.now(),
+          migratedFromUserDoc: true,
+        });
+      }
+      await updateDoc(uref, { routinesMigratedAt: serverTimestamp() });
+    } catch (e) {
+      console.error('Legacy routines migration failed', e);
+    }
+  };
 
   const formatTime = (t: RoutineTime) => `${String(t.hour).padStart(2,'0')}:${String(t.minute).padStart(2,'0')} ${t.period}`;
 
@@ -89,10 +205,11 @@ export default function DailyRoutinesScreen() {
       Alert.alert('Missing info', 'Please enter a title and add at least one time.');
       return;
     }
-    if (!user) { Alert.alert('Not signed in', 'Please log in to save routines.'); return; }
+  if (!user) { Alert.alert('Not signed in', 'Please log in to save routines.'); return; }
+  if (currentRole !== 'family') { Alert.alert('Not allowed', 'Only family members can add routines.'); return; }
     try {
       const payload = {
-        uid: user.uid,
+        uid: dataOwnerUid ?? user.uid,
         title: current.title,
         notes: current.notes ?? '',
         times: (current.times || []).map(t => ({ id: t.id, hour: t.hour, minute: t.minute, period: t.period })),
@@ -128,10 +245,15 @@ export default function DailyRoutinesScreen() {
   <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Daily Routines</Text>
-            <TouchableOpacity style={styles.addIconButton} onPress={() => setShowAdd(true)}>
+            {currentRole === 'family' && (
+              <TouchableOpacity style={styles.addIconButton} onPress={() => setShowAdd(true)}>
               <Ionicons name="add-circle" size={32} color="#d63384" />
-            </TouchableOpacity>
+              </TouchableOpacity>
+            )}
           </View>
+          {dataOwnerUid && user?.uid !== dataOwnerUid && managingFor ? (
+            <View style={styles.manageBanner}><Text style={styles.manageBannerText}>Managing: {managingFor}</Text></View>
+          ) : null}
 
           {isLoading ? (
             <View style={styles.emptyWrapper}><View style={styles.emptyCard}><Text style={styles.emptyText}>Loading...</Text></View></View>
@@ -140,7 +262,7 @@ export default function DailyRoutinesScreen() {
           ) : (
             <View style={{ gap: 16 }}>
               {routines.map(r => (
-                <Swipeable key={r.id} renderLeftActions={renderLeftActions} onSwipeableOpen={() => deleteRoutine(r.id)} overshootLeft={false} friction={2}>
+                <Swipeable key={r.id} renderLeftActions={renderLeftActions} onSwipeableOpen={() => { if (currentRole !== 'family') { Alert.alert('Not allowed', 'Only family members can delete.'); return; } deleteRoutine(r.id); }} overshootLeft={false} friction={2}>
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>{r.title}</Text>
                     {r.notes ? <Text style={styles.cardNotes}>{r.notes}</Text> : null}
@@ -241,6 +363,8 @@ const styles = StyleSheet.create({
   secondary: { backgroundColor: '#6c757d' },
   primary: { backgroundColor: '#d63384' },
   modalButtonText: { color: '#fff', fontWeight: '600' },
+  manageBanner: { backgroundColor: 'rgba(214, 51, 132, 0.08)', borderColor: 'rgba(214, 51, 132, 0.3)', borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 12 },
+  manageBannerText: { color: '#d63384', fontWeight: '600' },
 });
 
 

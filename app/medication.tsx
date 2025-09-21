@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { addDoc, collection, deleteDoc, doc, DocumentData, getDocs, query, QueryDocumentSnapshot, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, DocumentData, getDoc, getDocs, onSnapshot, query, QueryDocumentSnapshot, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     Alert,
@@ -40,6 +40,10 @@ interface Medication {
 export default function MedicationScreen() {
   const [medications, setMedications] = useState<Medication[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isResolvingOwner, setIsResolvingOwner] = useState<boolean>(false);
+  const [dataOwnerUid, setDataOwnerUid] = useState<string | null>(null);
+  const [managingFor, setManagingFor] = useState<string | null>(null);
+  const [currentRole, setCurrentRole] = useState<'elder' | 'family' | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
   const [currentMedication, setCurrentMedication] = useState<Partial<Medication>>({
@@ -65,50 +69,192 @@ export default function MedicationScreen() {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   }
 
+  // Resolve whose data to show: elder sees own; family sees connected elder's
   useEffect(() => {
-    let isMounted = true;
-    // Fetch user's medicines from Firestore (root collection 'medicines' filtered by UID)
-    const loadMedications = async () => {
-      if (!user) {
-        setMedications([]);
-        return;
-      }
+    const resolveOwner = async () => {
+      setIsResolvingOwner(true);
+      setDataOwnerUid(null);
+      if (!user) { setIsResolvingOwner(false); return; }
       try {
-        setIsLoading(true);
-        const medicinesRef = collection(db, 'medicines');
-        const q = query(medicinesRef, where('uid', '==', user.uid));
-        const snapshot = await getDocs(q);
-        const items: Medication[] = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
-          const data = d.data() as any;
-          const times: MedicationTime[] = Array.isArray(data?.times)
-            ? data.times.map((t: any, idx: number) => ({
-                id: t?.id ?? `${d.id}-t${idx}`,
-                hour: Number(t?.hour ?? 0),
-                minute: Number(t?.minute ?? 0),
-                period: (t?.period === 'PM' ? 'PM' : 'AM') as 'AM' | 'PM',
-              }))
-            : [];
-          return {
-            id: d.id,
-            name: String(data?.name ?? ''),
-            dosage: String(data?.dosage ?? ''),
-            instructions: String(data?.instructions ?? ''),
-            times,
-          } as Medication;
-        });
-        if (isMounted) setMedications(items);
+        const userDocRef = doc(collection(db, 'users'), user.uid);
+        const userDoc = await getDoc(userDocRef);
+        if (!userDoc.exists()) {
+          // Fallback: treat as elder showing own data
+          setDataOwnerUid(user.uid);
+          return;
+        }
+        const data = userDoc.data() as any;
+        const role = (data?.role || 'elder') as 'elder' | 'family';
+        setCurrentRole(role);
+        if (role === 'elder') {
+          setDataOwnerUid(user.uid);
+          setManagingFor(null);
+          return;
+        }
+        // role === 'family': find connected elder
+        const connectedElders: string[] = Array.isArray(data?.connectedElders) ? data.connectedElders : [];
+        if (connectedElders.length > 0) {
+          const owner = connectedElders[0];
+          setDataOwnerUid(owner);
+          try {
+            const oDoc = await getDoc(doc(collection(db, 'users'), owner));
+            if (oDoc.exists()) {
+              const od = oDoc.data() as any;
+              const name = `${od?.firstName || ''} ${od?.lastName || ''}`.trim() || od?.phone || owner;
+              setManagingFor(name);
+            }
+          } catch {}
+          return;
+        }
+        // Fallback: find elder whose connectedTo == this family uid
+        const eldersSnap = await getDocs(query(collection(db, 'users'), where('connectedTo', '==', user.uid)));
+        if (!eldersSnap.empty) {
+          const owner = eldersSnap.docs[0].id;
+          setDataOwnerUid(owner);
+          try {
+            const od = eldersSnap.docs[0].data() as any;
+            const name = `${od?.firstName || ''} ${od?.lastName || ''}`.trim() || od?.phone || owner;
+            setManagingFor(name);
+          } catch {}
+          return;
+        }
+        // No connection found; show own (empty) to avoid crash
+        setDataOwnerUid(user.uid);
+        setManagingFor(null);
+        setCurrentRole(role);
       } catch (e) {
-        console.error('Failed to load medications', e);
-        if (isMounted) setMedications([]);
+        console.error('Failed to resolve data owner uid', e);
+        setDataOwnerUid(user?.uid ?? null);
+        setManagingFor(null);
+        setCurrentRole(null);
       } finally {
-        if (isMounted) setIsLoading(false);
+        setIsResolvingOwner(false);
       }
     };
-    loadMedications();
-    return () => {
-      isMounted = false;
-    };
+    resolveOwner();
   }, [user]);
+
+  // Subscribe to medications for the resolved owner uid
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    setIsLoading(true);
+    setMedications([]);
+    if (!dataOwnerUid) {
+      setIsLoading(false);
+      return;
+    }
+    try {
+      const uids = currentRole === 'family' && user?.uid && user.uid !== dataOwnerUid
+        ? [dataOwnerUid, user.uid]
+        : [dataOwnerUid];
+      const medicinesRef = uids.length > 1
+        ? query(collection(db, 'medicines'), where('uid', 'in', uids))
+        : query(collection(db, 'medicines'), where('uid', '==', uids[0]!));
+      unsubscribe = onSnapshot(
+        medicinesRef,
+        (snapshot) => {
+          const items: Medication[] = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
+            const data = d.data() as any;
+            const times: MedicationTime[] = Array.isArray(data?.times)
+              ? data.times.map((t: any, idx: number) => ({
+                  id: t?.id ?? `${d.id}-t${idx}`,
+                  hour: Number(t?.hour ?? 0),
+                  minute: Number(t?.minute ?? 0),
+                  period: (t?.period === 'PM' ? 'PM' : 'AM') as 'AM' | 'PM',
+                }))
+              : [];
+            return {
+              id: d.id,
+              name: String(data?.name ?? ''),
+              dosage: String(data?.dosage ?? ''),
+              instructions: String(data?.instructions ?? ''),
+              times,
+            } as Medication;
+          });
+          if (items.length === 0) {
+            // Attempt legacy migration from users doc 'medicines' array
+            attemptMigrateLegacyMedications(dataOwnerUid).finally(() => {
+              setMedications(items);
+              setIsLoading(false);
+            });
+          } else {
+            setMedications(items);
+            setIsLoading(false);
+          }
+        },
+        (error) => {
+          console.error('Failed to subscribe medications', error);
+          setMedications([]);
+          setIsLoading(false);
+        }
+      );
+    } catch (e) {
+      console.error('Failed to init medications listener', e);
+      setIsLoading(false);
+    }
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, [dataOwnerUid, user, currentRole]);
+
+  const parseLegacyTimeString = (s: string): MedicationTime | null => {
+    try {
+      // Expect formats like "8:30 AM" or "12:05 PM"
+      const m = s.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+      if (!m) return null;
+      const h12 = Math.min(12, Math.max(1, parseInt(m[1], 10)));
+      const minute = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+      const period = m[3].toUpperCase() === 'PM' ? 'PM' : 'AM';
+      return { id: `${Date.now()}-${h12}-${minute}-${period}`, hour: h12, minute, period };
+    } catch {
+      return null;
+    }
+  };
+
+  const attemptMigrateLegacyMedications = async (ownerUid: string | null) => {
+    if (!ownerUid) return;
+    try {
+      const uref = doc(collection(db, 'users'), ownerUid);
+      const udoc = await getDoc(uref);
+      if (!udoc.exists()) return;
+      const u = udoc.data() as any;
+      if (u?.medicinesMigratedAt) return; // already migrated
+      const legacyMeds: any[] = Array.isArray(u?.medicines) ? u.medicines : [];
+      if (!legacyMeds.length) return;
+      for (const lm of legacyMeds) {
+        const name = String(lm?.name ?? '').trim();
+        if (!name) continue;
+        const dosage = String(lm?.dosage ?? '').trim();
+        const timesArr: MedicationTime[] = Array.isArray(lm?.timings)
+          ? lm.timings.map((t: any) => (typeof t === 'string' ? parseLegacyTimeString(t) : null)).filter(Boolean) as MedicationTime[]
+          : [];
+        const medRef = await addDoc(collection(db, 'medicines'), {
+          uid: ownerUid,
+          name,
+          dosage,
+          instructions: '',
+          times: timesArr.map(t => ({ id: t.id, hour: t.hour, minute: t.minute, period: t.period })),
+          createdAt: Date.now(),
+          migratedFromUserDoc: true,
+        });
+
+        // If legacy stock (days left) present, derive quantity = daysLeft * timesPerDay
+        const daysLeft = Number(lm?.stock ?? NaN);
+        const perDay = timesArr.length || Number(lm?.times?.length || 0);
+        if (Number.isFinite(daysLeft) && perDay > 0) {
+          const quantity = Math.max(0, Math.floor(daysLeft) * perDay);
+          await addDoc(collection(db, 'medicineStocks'), {
+            uid: ownerUid,
+            medicineId: medRef.id,
+            quantity,
+            lastDecrementDate: null,
+            migratedFromUserDoc: true,
+          });
+        }
+      }
+      await updateDoc(uref, { medicinesMigratedAt: serverTimestamp() });
+    } catch (e) {
+      console.error('Legacy medicines migration failed', e);
+    }
+  };
 
   // Helper to add time from a Date object
   const addTimeFromDate = (date: Date) => {
@@ -149,10 +295,18 @@ export default function MedicationScreen() {
       Alert.alert('Not signed in', 'Please log in to save medications.');
       return;
     }
+    if (currentRole !== 'family') {
+      Alert.alert('Not allowed', 'Only family members can add medications.');
+      return;
+    }
+    if (!dataOwnerUid) {
+      Alert.alert('Not connected', 'No connected elder found. Please connect with an elder account first.');
+      return;
+    }
 
     try {
       const payload = {
-        uid: user.uid,
+        uid: dataOwnerUid,
         name: currentMedication.name,
         dosage: currentMedication.dosage,
         instructions: currentMedication.instructions ?? '',
@@ -235,13 +389,21 @@ export default function MedicationScreen() {
   <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>Medication Management</Text>
-          <TouchableOpacity
-            style={styles.addIconButton}
-            onPress={() => setShowAddModal(true)}
-          >
-            <Ionicons name="add-circle" size={32} color="#d63384" />
-          </TouchableOpacity>
+          {currentRole === 'family' && (
+            <TouchableOpacity
+              style={styles.addIconButton}
+              onPress={() => setShowAddModal(true)}
+            >
+              <Ionicons name="add-circle" size={32} color="#d63384" />
+            </TouchableOpacity>
+          )}
         </View>
+
+        {dataOwnerUid && user?.uid !== dataOwnerUid && managingFor ? (
+          <View style={styles.manageBanner}>
+            <Text style={styles.manageBannerText}>Managing: {managingFor}</Text>
+          </View>
+        ) : null}
 
         {isLoading ? (
           <View style={styles.emptyWrapper}>
@@ -259,7 +421,10 @@ export default function MedicationScreen() {
               <Swipeable
                 key={medication.id}
                 renderLeftActions={renderLeftActions}
-                onSwipeableOpen={() => handleSwipeDelete(medication.id)}
+                onSwipeableOpen={() => {
+                  if (currentRole !== 'family') { Alert.alert('Not allowed', 'Only family members can delete.'); return; }
+                  handleSwipeDelete(medication.id);
+                }}
                 overshootLeft={false}
                 friction={2}
               >
@@ -640,6 +805,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  manageBanner: {
+    backgroundColor: 'rgba(214, 51, 132, 0.08)',
+    borderColor: 'rgba(214, 51, 132, 0.3)',
+    borderWidth: 1,
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  manageBannerText: { color: '#d63384', fontWeight: '600' },
 }); 
 
 // Mock helpers removed; Firestore is the source of truth now

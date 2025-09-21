@@ -7,7 +7,6 @@ const {
   withAndroidManifest,
   withAppBuildGradle,
   withDangerousMod,
-  withMainApplication,
 } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
@@ -29,6 +28,12 @@ const withForegroundServiceManifest = (config) => {
     const pkg = getPackageName(config.android?.package);
     const manifest = config.modResults;
 
+    // Ensure tools namespace
+    manifest.manifest.$ = manifest.manifest.$ || {};
+    if (!manifest.manifest.$['xmlns:tools']) {
+      manifest.manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
+    }
+
     // Ensure permissions
     const perms = [
       'android.permission.RECEIVE_BOOT_COMPLETED',
@@ -46,6 +51,19 @@ const withForegroundServiceManifest = (config) => {
 
     const app = AndroidConfig.Manifest.getMainApplication(manifest);
     if (!app) throw new Error('MainApplication not found in AndroidManifest');
+
+    // Fix appComponentFactory conflict
+    app.$ = app.$ || {};
+    const replaceKey = 'tools:replace';
+    const entry = 'android:appComponentFactory';
+    if (!app.$[replaceKey]) {
+      app.$[replaceKey] = entry;
+    } else if (typeof app.$[replaceKey] === 'string' && !app.$[replaceKey].split(',').map((s) => s.trim()).includes(entry)) {
+      app.$[replaceKey] = app.$[replaceKey] + `,${entry}`;
+    }
+    if (!app.$['android:appComponentFactory']) {
+      app.$['android:appComponentFactory'] = 'androidx.core.app.CoreComponentFactory';
+    }
 
     // Service entry
     app.service = app.service || [];
@@ -68,7 +86,7 @@ const withForegroundServiceManifest = (config) => {
     const receiverName = `${pkg}.${RECEIVER_CLASS}`;
     if (!app.receiver.some((r) => r.$['android:name'] === receiverName)) {
       app.receiver.push({
-        $: { 'android:name': receiverName, 'android:enabled': 'true', 'android:exported': 'false' },
+        $: { 'android:name': receiverName, 'android:enabled': 'true', 'android:exported': 'true' },
         'intent-filter': [
           { action: [{ $: { 'android:name': 'android.intent.action.BOOT_COMPLETED' } }] },
         ],
@@ -262,31 +280,17 @@ class ${PACKAGE_CLASS} : ReactPackage {
   ]);
 };
 
-const withRegisterPackage = (config) => {
-  return withMainApplication(config, (cfg) => {
-    const pkg = getPackageName(cfg.android?.package);
-    const src = cfg.modResults.contents;
-    if (!src.includes(`${pkg}.${PACKAGE_CLASS}`)) {
-      // import
-      cfg.modResults.contents = src.replace(
-        /(package [^\n]+\n)/,
-        `$1\nimport ${pkg}.${PACKAGE_CLASS}\n`
-      ).replace(
-        /packages\)\s*\{\s*return Arrays\.asList\(/,
-        (m) => m + `\n            new ${PACKAGE_CLASS}(),`
-      );
-    }
-    return cfg;
-  });
-};
+// We skip modifying MainApplication to register a package for compatibility with Expo managed apps.
 
 const withGradle = (config) => withAppBuildGradle(config, (cfg) => {
-  // Ensure Kotlin is enabled (most templates already have it)
+  // Ensure Kotlin Android plugin is applied using modern id
   const contents = cfg.modResults.contents;
-  if (!contents.includes('kotlin-android')) {
+  const hasOld = contents.includes("id 'kotlin-android'") || contents.includes('id("kotlin-android")');
+  const hasNew = contents.includes("id 'org.jetbrains.kotlin.android'") || contents.includes('id("org.jetbrains.kotlin.android")');
+  if (!hasOld && !hasNew) {
     cfg.modResults.contents = contents.replace(
       /plugins\s*\{/,
-      (m) => `${m}\n    id 'kotlin-android'\n`
+      (m) => `${m}\n    id 'org.jetbrains.kotlin.android'\n`
     );
   }
   return cfg;
@@ -295,7 +299,6 @@ const withGradle = (config) => withAppBuildGradle(config, (cfg) => {
 const withAndroidFallService = (config) => {
   config = withForegroundServiceManifest(config);
   config = withNativeFiles(config);
-  config = withRegisterPackage(config);
   config = withGradle(config);
   return config;
 };

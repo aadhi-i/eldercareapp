@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { addDoc, collection, doc, DocumentData, onSnapshot, query, QueryDocumentSnapshot, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, DocumentData, getDoc, getDocs, onSnapshot, query, QueryDocumentSnapshot, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import { Alert, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -17,21 +17,76 @@ export default function MedicineStockScreen() {
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [stocks, setStocks] = useState<Record<string, Stock>>({});
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [dataOwnerUid, setDataOwnerUid] = useState<string | null>(null);
   const [showAddStock, setShowAddStock] = useState<boolean>(false);
   const [selectedMedicineId, setSelectedMedicineId] = useState<string | null>(null);
   const [addQuantity, setAddQuantity] = useState<string>('');
+  const [managingFor, setManagingFor] = useState<string | null>(null);
+  const [currentRole, setCurrentRole] = useState<'elder' | 'family' | null>(null);
 
   if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   }
 
   useEffect(() => {
-    if (!user) { setMedicines([]); setStocks({}); return; }
+    if (!user) { setMedicines([]); setStocks({}); setDataOwnerUid(null); return; }
+    // Resolve data owner uid similar to other screens
+    (async () => {
+      try {
+        const uref = doc(collection(db, 'users'), user.uid);
+        const udoc = await getDoc(uref);
+        if (!udoc.exists()) { setDataOwnerUid(user.uid); setManagingFor(null); return; }
+        const data = udoc.data() as any;
+  const role = (data?.role || 'elder') as 'elder'|'family';
+  setCurrentRole(role);
+  if (role === 'elder') { setDataOwnerUid(user.uid); setManagingFor(null); return; }
+        const connectedElders: string[] = Array.isArray(data?.connectedElders) ? data.connectedElders : [];
+        if (connectedElders.length) {
+          const owner = connectedElders[0];
+          setDataOwnerUid(owner);
+          try {
+            const odoc = await getDoc(doc(collection(db, 'users'), owner));
+            if (odoc.exists()) {
+              const od = odoc.data() as any;
+              const name = `${od?.firstName || ''} ${od?.lastName || ''}`.trim() || od?.phone || owner;
+              setManagingFor(name);
+            }
+          } catch {}
+          return; 
+        }
+        const esnap = await getDocs(query(collection(db, 'users'), where('connectedTo', '==', user.uid)));
+        if (!esnap.empty) {
+          const owner = esnap.docs[0].id;
+          setDataOwnerUid(owner);
+          try {
+            const od = esnap.docs[0].data() as any;
+            const name = `${od?.firstName || ''} ${od?.lastName || ''}`.trim() || od?.phone || owner;
+            setManagingFor(name);
+          } catch {}
+          return;
+        }
+        setDataOwnerUid(user.uid);
+        setManagingFor(null);
+        setCurrentRole(role);
+      } catch (e) {
+        console.error('Failed to resolve stock owner uid', e);
+        setDataOwnerUid(user.uid);
+        setManagingFor(null);
+        setCurrentRole(null);
+      }
+    })();
+  }, [user]);
+
+  useEffect(() => {
+    if (!dataOwnerUid) { setMedicines([]); setStocks({}); return; }
     let unsubMeds: (() => void) | null = null;
     let unsubStocks: (() => void) | null = null;
     setIsLoading(true);
     try {
-      const medsRef = query(collection(db, 'medicines'), where('uid', '==', user.uid));
+      const uids = currentRole === 'family' && user?.uid && user.uid !== dataOwnerUid ? [dataOwnerUid, user.uid] : [dataOwnerUid];
+      const medsRef = uids.length > 1
+        ? query(collection(db, 'medicines'), where('uid', 'in', uids as string[]))
+        : query(collection(db, 'medicines'), where('uid', '==', uids[0]!));
       unsubMeds = onSnapshot(medsRef, snapshot => {
         const items: Medicine[] = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
           const data = d.data() as any;
@@ -46,8 +101,10 @@ export default function MedicineStockScreen() {
         setMedicines(items);
       });
 
-      const stocksRef = query(collection(db, 'medicineStocks'), where('uid', '==', user.uid));
-      unsubStocks = onSnapshot(stocksRef, snapshot => {
+      const stocksRef = uids.length > 1
+        ? query(collection(db, 'medicineStocks'), where('uid', 'in', uids as string[]))
+        : query(collection(db, 'medicineStocks'), where('uid', '==', uids[0]!));
+      unsubStocks = onSnapshot(stocksRef, async snapshot => {
         const map: Record<string, Stock> = {};
         snapshot.docs.forEach((d: QueryDocumentSnapshot<DocumentData>) => {
           const data = d.data() as any;
@@ -58,6 +115,9 @@ export default function MedicineStockScreen() {
             lastDecrementDate: typeof data?.lastDecrementDate === 'number' ? data.lastDecrementDate : undefined,
           };
         });
+        if (Object.keys(map).length === 0) {
+          await attemptMigrateLegacyStocks(dataOwnerUid);
+        }
         setStocks(map);
       });
     } catch (e) {
@@ -69,7 +129,38 @@ export default function MedicineStockScreen() {
       unsubMeds && unsubMeds();
       unsubStocks && unsubStocks();
     };
-  }, [user]);
+  }, [dataOwnerUid, user, currentRole]);
+
+  const attemptMigrateLegacyStocks = async (ownerUid: string | null) => {
+    if (!ownerUid) return;
+    try {
+      const uref = doc(collection(db, 'users'), ownerUid);
+      const udoc = await getDoc(uref);
+      if (!udoc.exists()) return;
+      const u = udoc.data() as any;
+      if (u?.stocksMigratedAt) return;
+      // If legacy medicines array has stock (days left), try to seed stocks based on current medicines list
+      const legacyMeds: any[] = Array.isArray(u?.medicines) ? u.medicines : [];
+      if (!legacyMeds.length) return;
+      // Build a quick name->medicineId map from current medicines for owner
+      const medsSnap = await getDocs(query(collection(db, 'medicines'), where('uid', '==', ownerUid)));
+      const nameToId = new Map<string, string>();
+      medsSnap.docs.forEach(md => { const m = md.data() as any; nameToId.set(String(m?.name ?? '').toLowerCase(), md.id); });
+      for (const lm of legacyMeds) {
+        const name = String(lm?.name ?? '').toLowerCase();
+        const medId = nameToId.get(name);
+        if (!medId) continue;
+        const daysLeft = Number(lm?.stock ?? NaN);
+        const timesPerDay = Array.isArray(lm?.timings) ? lm.timings.length : 0;
+        if (!Number.isFinite(daysLeft) || timesPerDay <= 0) continue;
+        const quantity = Math.max(0, Math.floor(daysLeft) * timesPerDay);
+        await addDoc(collection(db, 'medicineStocks'), { uid: ownerUid, medicineId: medId, quantity, lastDecrementDate: null, migratedFromUserDoc: true });
+      }
+      await updateDoc(uref, { stocksMigratedAt: serverTimestamp() });
+    } catch (e) {
+      console.error('Legacy stock migration failed', e);
+    }
+  };
 
   // Enhanced automatic stock decrease based on medication schedules
   useEffect(() => {
@@ -134,13 +225,16 @@ export default function MedicineStockScreen() {
   }, [medicines, stocks, user]);
 
   const openAddStock = (medicineId: string) => {
+    if (currentRole !== 'family') { Alert.alert('Not allowed', 'Only family members can add stock.'); return; }
     setSelectedMedicineId(medicineId);
     setAddQuantity('');
     setShowAddStock(true);
   };
 
   const saveStock = async () => {
-    if (!user || !selectedMedicineId) return;
+  if (!user || !selectedMedicineId) return;
+  if (currentRole !== 'family') { Alert.alert('Not allowed', 'Only family members can add stock.'); return; }
+    if (!dataOwnerUid) { Alert.alert('Not connected', 'No connected elder found.'); return; }
     const qty = Number(addQuantity);
     if (!Number.isFinite(qty) || qty <= 0) { Alert.alert('Invalid quantity'); return; }
     try {
@@ -148,7 +242,7 @@ export default function MedicineStockScreen() {
       if (existing) {
         await updateDoc(doc(db, 'medicineStocks', existing.id), { quantity: existing.quantity + qty });
       } else {
-        await addDoc(collection(db, 'medicineStocks'), { uid: user.uid, medicineId: selectedMedicineId, quantity: qty, lastDecrementDate: null });
+        await addDoc(collection(db, 'medicineStocks'), { uid: dataOwnerUid, medicineId: selectedMedicineId, quantity: qty, lastDecrementDate: null });
       }
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setShowAddStock(false);
@@ -178,10 +272,9 @@ export default function MedicineStockScreen() {
   <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.header}>
             <Text style={styles.title}>Medicine Stock</Text>
-            <TouchableOpacity style={styles.addIconButton}>
-              <Ionicons name="add-circle" size={32} color="#d63384" />
-            </TouchableOpacity>
+            {/* No global add button in stock page */}
           </View>
+          {/* Removed Managing banner per request */}
           {isLoading ? (
             <View style={styles.emptyCard}><Text style={styles.emptyText}>Loading...</Text></View>
           ) : medicines.length === 0 ? (
@@ -268,5 +361,7 @@ const styles = StyleSheet.create({
   secondary: { backgroundColor: '#6c757d' },
   primary: { backgroundColor: '#d63384' },
   modalButtonText: { color: '#fff', fontWeight: '600' },
+  manageBanner: { backgroundColor: 'rgba(214, 51, 132, 0.08)', borderColor: 'rgba(214, 51, 132, 0.3)', borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 12 },
+  manageBannerText: { color: '#d63384', fontWeight: '600' },
 });
 
