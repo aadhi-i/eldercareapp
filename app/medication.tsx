@@ -399,11 +399,7 @@ export default function MedicationScreen() {
           )}
         </View>
 
-        {dataOwnerUid && user?.uid !== dataOwnerUid && managingFor ? (
-          <View style={styles.manageBanner}>
-            <Text style={styles.manageBannerText}>Managing: {managingFor}</Text>
-          </View>
-        ) : null}
+        {/* Removed Managing banner per request */}
 
         {isLoading ? (
           <View style={styles.emptyWrapper}>

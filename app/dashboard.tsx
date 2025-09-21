@@ -153,11 +153,16 @@ export default function Dashboard() {
             const familyUid = elderProfileData.connectedTo || familyData?.uid || familyData?.id;
             await loadDashboardCollections(elderUid, familyUid);
 
-            // Schedule reminders for the elder profile
-            if (currentUserData.role === 'elder') {
-              await reminderService.scheduleAllReminders(currentUserData.uid);
-            } else if (currentUserData.role === 'family') {
-              await reminderService.scheduleElderReminders(currentUserData.uid);
+            // Start reminder watching (auto-reschedules on data changes)
+            try {
+              await reminderService.initialize();
+              if (currentUserData.role === 'elder') {
+                reminderService.startWatchingElder(elderProfileData.uid || currentUserData.uid);
+              } else if (currentUserData.role === 'family') {
+                await reminderService.startWatchingForFamily(currentUserData.uid);
+              }
+            } catch (e) {
+              console.warn('Reminder watcher setup failed', e);
             }
           }
         } else {
@@ -173,6 +178,13 @@ export default function Dashboard() {
 
     fetchSharedData();
   }, [authLoading, user?.uid]);
+
+  // Cleanup reminder watchers on unmount or account switch
+  useEffect(() => {
+    return () => {
+      try { reminderService.stopWatching(); } catch {}
+    };
+  }, []);
 
   // Fall toggle loaded in DrawerLayout
 
@@ -363,54 +375,33 @@ export default function Dashboard() {
         });
       }
 
-      // Compute upcoming medications: soonest today across all meds
-      const now = new Date();
-      const upcomingMedList: any[] = [];
-      meds.forEach((m) => {
-        const times = Array.isArray(m?.times) ? m.times : [];
-        times.forEach((t: any) => {
-          const h12 = Number(t?.hour ?? 0);
-          const mins = Number(t?.minute ?? 0);
-          const period = String(t?.period || '').toUpperCase();
-          let h24 = h12 % 12;
-          if (period === 'PM') h24 += 12;
-          const dt = new Date();
-          dt.setHours(h24, mins, 0, 0);
-          if (dt > now) {
-            upcomingMedList.push({
-              name: m.name,
-              dosage: m.dosage,
-              time: `${String(h12).padStart(2, '0')}:${String(mins).padStart(2, '0')} ${period || (h24 >= 12 ? 'PM' : 'AM')}`,
-              timeObj: dt,
-            });
-          }
-        });
+      // Upcoming Medications render like "Family meds summary": show name, dosage, and all scheduled times
+      const medsForUpcoming = (currentUserRole === 'elder' && familyUid)
+        ? meds.filter((m: any) => String(m?.uid || '') === String(familyUid))
+        : meds;
+      const upcomingMedList: any[] = medsForUpcoming.map((m: any) => {
+        const timesArr = Array.isArray(m?.times) ? m.times : [];
+        const timesStr = timesArr
+          .map((t: any) => formatTime(t))
+          .filter(Boolean)
+          .join(', ');
+        return {
+          name: m?.name,
+          dosage: m?.dosage,
+          time: timesStr,
+        };
       });
-      upcomingMedList.sort((a, b) => a.timeObj.getTime() - b.timeObj.getTime());
       setUpcomingMedications(upcomingMedList.slice(0, 3));
 
-      // Compute upcoming routines: soonest today across all routines
-      const upcomingRoutList: any[] = [];
-      routs.forEach((r) => {
-        const times = Array.isArray(r?.times) ? r.times : [];
-        times.forEach((t: any) => {
-          const h12 = Number(t?.hour ?? 0);
-          const mins = Number(t?.minute ?? 0);
-          const period = String(t?.period || '').toUpperCase();
-          let h24 = h12 % 12;
-          if (period === 'PM') h24 += 12;
-          const dt = new Date();
-          dt.setHours(h24, mins, 0, 0);
-          if (dt > now) {
-            upcomingRoutList.push({
-              title: r.title,
-              time: `${String(h12).padStart(2, '0')}:${String(mins).padStart(2, '0')} ${period || (h24 >= 12 ? 'PM' : 'AM')}`,
-              timeObj: dt,
-            });
-          }
-        });
+      // Upcoming Routines: show like summary with all times
+      const routsForUpcoming = (currentUserRole === 'elder' && familyUid)
+        ? routs.filter((r: any) => String(r?.uid || '') === String(familyUid))
+        : routs;
+      const upcomingRoutList: any[] = routsForUpcoming.map((r: any) => {
+        const timesArr = Array.isArray(r?.times) ? r.times : [];
+        const timesStr = timesArr.map((t: any) => formatTime(t)).join(', ');
+        return { title: r?.title, time: timesStr };
       });
-      upcomingRoutList.sort((a, b) => a.timeObj.getTime() - b.timeObj.getTime());
       setUpcomingRoutines(upcomingRoutList.slice(0, 3));
 
       // Compute low stock: by days left ascending using medicines' frequency
@@ -597,10 +588,6 @@ export default function Dashboard() {
           <Text style={styles.welcomeTitle}>
             Welcome, {currentUserRole === 'family' ? familyData?.firstName : elderData?.firstName}!
           </Text>
-          <Text style={styles.welcomeSubtitle}>
-            {currentUserRole === 'family' ? 'Managing care for' : 'Your health dashboard'}
-            {elderData && ` ${elderData.firstName} ${elderData.lastName}`}
-          </Text>
         </View>
 
         {/* Profile details moved to Profile tab (app/settings.tsx). Removed from dashboard. */}
@@ -667,37 +654,9 @@ export default function Dashboard() {
           </View>
         )}
 
-        {/* Medicines Card (from family member account) */}
-        <View style={styles.cardWhite}>
-          <Text style={styles.cardTitle}>Family Member's Medications</Text>
-          <Text style={styles.cardContent}>
-            {medications && medications.length > 0
-              ? medications
-                  .map((m: any) => {
-                    const timesArr = Array.isArray(m.times) ? m.times : [];
-                    const timesStr = timesArr.map((t: any) => formatTime(t)).join(', ');
-                    return `• ${m.name ?? ''} — ${m.dosage ?? ''}${timesStr ? ` — ${timesStr}` : ''}`;
-                  })
-                  .join('\n')
-              : 'No medications scheduled by family member'}
-          </Text>
-        </View>
+        {/* Removed separate Family Member's Medications card: Upcoming Medications now shows these with times and dosage */}
 
-        {/* Daily Routine Card (from family member account) */}
-        <View style={styles.cardWhite}>
-          <Text style={styles.cardTitle}>Daily Routines</Text>
-          <Text style={styles.cardContent}>
-            {routines && routines.length > 0
-              ? routines
-                  .map((r: any) => {
-                    const timesArr = Array.isArray(r.times) ? r.times : [];
-                    const timesStr = timesArr.map((t: any) => formatTime(t)).join(', ');
-                    return `• ${r.title ?? ''}${timesStr ? ` — ${timesStr}` : ''}`;
-                  })
-                  .join('\n')
-              : 'No routines scheduled'}
-          </Text>
-        </View>
+        {/* Removed separate Daily Routines card: Upcoming Routines now shows these with times */}
 
         {/* Fall Detection toggle moved to Drawer */}
       </ScrollView>

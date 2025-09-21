@@ -251,9 +251,7 @@ export default function DailyRoutinesScreen() {
               </TouchableOpacity>
             )}
           </View>
-          {dataOwnerUid && user?.uid !== dataOwnerUid && managingFor ? (
-            <View style={styles.manageBanner}><Text style={styles.manageBannerText}>Managing: {managingFor}</Text></View>
-          ) : null}
+          {/* Removed Managing banner per request */}
 
           {isLoading ? (
             <View style={styles.emptyWrapper}><View style={styles.emptyCard}><Text style={styles.emptyText}>Loading...</Text></View></View>

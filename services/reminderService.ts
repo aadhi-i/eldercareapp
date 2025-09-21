@@ -1,5 +1,5 @@
 import * as Notifications from 'expo-notifications';
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebaseConfig';
 
 // Configure notification behavior
@@ -12,13 +12,17 @@ Notifications.setNotificationHandler({
 });
 
 export interface Medicine {
+  id?: string;
+  uid?: string;
   name: string;
-  timings: string[];
+  timings?: string[]; // legacy
+  times?: Array<{ id?: string; hour: number; minute: number; period: 'AM' | 'PM' }>; // current
   dosage: string;
-  stock?: number;
 }
 
 export interface Routine {
+  id?: string;
+  uid?: string;
   name: string;
   time: string;
   type: string;
@@ -43,6 +47,9 @@ export interface UserProfile {
 
 class ReminderService {
   private scheduledNotifications: string[] = [];
+  private watchUnsubs: Array<() => void> = [];
+  private watchTargetElder: string | null = null;
+  private debounceTimer: any = null;
 
   // Request notification permissions
   async requestPermissions(): Promise<boolean> {
@@ -71,20 +78,16 @@ class ReminderService {
     }
   }
 
-  // Schedule medication reminder (5 minutes before)
+  // Schedule medication reminder (10 minutes before)
   async scheduleMedicationReminder(medicine: Medicine, timeString: string): Promise<string | null> {
     try {
-      const notificationTime = this.parseTimeString(timeString);
-      if (!notificationTime) return null;
-
-      // Schedule 5 minutes before
-      const reminderTime = new Date(notificationTime.getTime() - 5 * 60 * 1000);
-      
-      // Don't schedule if the time has already passed today
-      if (reminderTime <= new Date()) {
-        return null;
-      }
-
+      const parsed = this.parseTimeString(timeString);
+      if (!parsed) return null;
+  const offsetMinutes = 10;
+  const reminderTime = new Date(parsed.getTime() - offsetMinutes * 60 * 1000);
+  // if time already passed today, push to tomorrow
+  if (reminderTime <= new Date()) reminderTime.setDate(reminderTime.getDate() + 1);
+  // Calendar daily trigger at specific time
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: '💊 Medication Reminder',
@@ -96,10 +99,7 @@ class ReminderService {
             dosage: medicine.dosage,
           },
         },
-        trigger: {
-          date: reminderTime,
-          repeats: true, // Repeat daily
-        },
+  trigger: ({ hour: reminderTime.getHours(), minute: reminderTime.getMinutes(), repeats: true } as any),
       });
 
       this.scheduledNotifications.push(notificationId);
@@ -111,20 +111,15 @@ class ReminderService {
     }
   }
 
-  // Schedule routine reminder (30 minutes before)
+  // Schedule routine reminder (20 minutes before)
   async scheduleRoutineReminder(routine: Routine): Promise<string | null> {
     try {
-      const notificationTime = this.parseTimeString(routine.time);
-      if (!notificationTime) return null;
-
-      // Schedule 30 minutes before
-      const reminderTime = new Date(notificationTime.getTime() - 30 * 60 * 1000);
-      
-      // Don't schedule if the time has already passed today
-      if (reminderTime <= new Date()) {
-        return null;
-      }
-
+      const parsed = this.parseTimeString(routine.time);
+      if (!parsed) return null;
+  const offsetMinutes = 20;
+  const reminderTime = new Date(parsed.getTime() - offsetMinutes * 60 * 1000);
+  if (reminderTime <= new Date()) reminderTime.setDate(reminderTime.getDate() + 1);
+  // Calendar daily trigger at specific time
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: '📅 Routine Reminder',
@@ -136,10 +131,7 @@ class ReminderService {
             description: routine.description,
           },
         },
-        trigger: {
-          date: reminderTime,
-          repeats: true, // Repeat daily
-        },
+  trigger: ({ hour: reminderTime.getHours(), minute: reminderTime.getMinutes(), repeats: true } as any),
       });
 
       this.scheduledNotifications.push(notificationId);
@@ -151,26 +143,51 @@ class ReminderService {
     }
   }
 
-  // Schedule low stock alert
-  async scheduleLowStockAlert(medicine: Medicine): Promise<string | null> {
+  // Schedule low stock alert (1 day before running out)
+  async scheduleLowStockAlert(params: { medicine: Medicine; quantity: number }): Promise<string | null> {
     try {
-      if (!medicine.stock || medicine.stock >= 3) return null;
+      const { medicine, quantity } = params;
+      // Determine daily consumption
+      const timesPerDay = Array.isArray(medicine.times) ? medicine.times.length : (Array.isArray(medicine.timings) ? medicine.timings.length : 0);
+      if (!timesPerDay) return null;
+
+      // Approximate quantity per dose from dosage text
+      const dosageText = (medicine.dosage || '').toLowerCase();
+      let qtyPerDose = 1;
+      const extractNum = (re: RegExp) => {
+        const m = dosageText.match(re);
+        return m ? parseInt(m[1]) : undefined;
+      };
+      qtyPerDose = extractNum(/(\d+)\s*tablet/) || extractNum(/(\d+)\s*capsule/) || extractNum(/(\d+)\s*ml/) || extractNum(/(\d+)\s*mg/) || extractNum(/(\d+)/) || 1;
+
+      const dailyConsumption = Math.max(1, timesPerDay * qtyPerDose);
+      const daysLeft = Math.floor(quantity / dailyConsumption);
+
+      // Compute alert time: 1 day before running out, at 9:00 AM
+      const now = new Date();
+      const alert = new Date(now);
+      alert.setHours(9, 0, 0, 0);
+      const daysUntilAlert = Math.max(0, daysLeft - 1);
+      alert.setDate(alert.getDate() + daysUntilAlert);
+
+      // If the computed alert time is in the past, schedule for soon (in 1 minute)
+      const triggerDate = alert.getTime() <= Date.now() ? new Date(Date.now() + 60 * 1000) : alert;
 
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: '⚠️ Low Stock Alert',
-          body: `${medicine.name} has only ${medicine.stock} days left`,
+          body: `${medicine.name} may run out in about 1 day`,
           data: {
             type: 'low_stock',
             medicineName: medicine.name,
-            stock: medicine.stock,
+            quantity,
           },
         },
-        trigger: null, // Show immediately
+        trigger: ({ date: triggerDate } as any),
       });
 
       this.scheduledNotifications.push(notificationId);
-      console.log(`Scheduled low stock alert for ${medicine.name}`);
+      console.log(`Scheduled low stock alert for ${medicine.name} on ${triggerDate.toISOString()}`);
       return notificationId;
     } catch (error) {
       console.error('Error scheduling low stock alert:', error);
@@ -205,52 +222,70 @@ class ReminderService {
     }
   }
 
+  private offsetHourMinute(hour24: number, minute: number, offsetMinutes: number): { hour: number; minute: number } {
+    const total = (hour24 * 60 + minute + offsetMinutes + 24 * 60) % (24 * 60);
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    return { hour: h, minute: m };
+  }
+
   // Schedule all reminders for a user
   async scheduleAllReminders(userId: string): Promise<void> {
     try {
       // Clear existing notifications
       await this.cancelAllNotifications();
-
-      // Get user data
+      // Resolve connected family (if any) for elder
       const usersRef = collection(db, 'users');
-      const userDocRef = doc(usersRef, userId);
-      const userDoc = await getDoc(userDocRef);
-
-      if (!userDoc.exists()) {
+      const uDoc = await getDoc(doc(usersRef, userId));
+      if (!uDoc.exists()) {
         console.log('User not found for reminder scheduling');
         return;
       }
+      const uData = uDoc.data() as UserProfile;
+      const elderUid = uData.uid || userId;
+      const familyUid = await this.resolveConnectedFamilyUid(elderUid);
+      const uids = familyUid && familyUid !== elderUid ? [elderUid, familyUid] : [elderUid];
 
-      const userData = userDoc.data() as UserProfile;
+      // Load medicines from Firestore
+      const medsSnap = uids.length > 1
+        ? await getDocs(query(collection(db, 'medicines'), where('uid', 'in', uids)))
+        : await getDocs(query(collection(db, 'medicines'), where('uid', '==', uids[0])));
+      const medicines: Medicine[] = medsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
 
       // Schedule medication reminders
-      if (userData.medicines && userData.medicines.length > 0) {
-        for (const medicine of userData.medicines) {
-          if (medicine.timings && medicine.timings.length > 0) {
-            for (const timing of medicine.timings) {
-              await this.scheduleMedicationReminder(medicine, timing);
-            }
-          }
+      for (const med of medicines) {
+        const timings: string[] = Array.isArray(med.timings) && med.timings.length
+          ? med.timings
+          : (Array.isArray(med.times) ? med.times.map(t => this.formatTime(t.hour, t.minute, t.period)) : []);
+        for (const t of timings) {
+          await this.scheduleMedicationReminder(med, t);
         }
       }
 
-      // Schedule routine reminders
-      if (userData.routines && userData.routines.length > 0) {
-        for (const routine of userData.routines) {
-          await this.scheduleRoutineReminder(routine);
+      // Load routines from Firestore
+      const routinesSnap = uids.length > 1
+        ? await getDocs(query(collection(db, 'dailyRoutines'), where('uid', 'in', uids)))
+        : await getDocs(query(collection(db, 'dailyRoutines'), where('uid', '==', uids[0])));
+      const routines: Routine[] = routinesSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      for (const r of routines) {
+        await this.scheduleRoutineReminder(r);
+      }
+
+      // Load stock and schedule 1-day alerts
+      const stockSnap = await getDocs(query(collection(db, 'medicineStocks'), where('uid', '==', elderUid)));
+      const stockByMed: Record<string, number> = {};
+      stockSnap.docs.forEach(s => {
+        const sd = s.data() as any;
+        if (sd?.medicineId) stockByMed[String(sd.medicineId)] = Number(sd.quantity ?? 0);
+      });
+      for (const med of medicines) {
+        const q = stockByMed[med.id!];
+        if (q && q > 0) {
+          await this.scheduleLowStockAlert({ medicine: med, quantity: q });
         }
       }
 
-      // Schedule low stock alerts
-      if (userData.medicines && userData.medicines.length > 0) {
-        for (const medicine of userData.medicines) {
-          if (medicine.stock && medicine.stock < 3) {
-            await this.scheduleLowStockAlert(medicine);
-          }
-        }
-      }
-
-      console.log(`Scheduled all reminders for user: ${userData.firstName} ${userData.lastName}`);
+      console.log(`Scheduled all reminders for user: ${elderUid}`);
     } catch (error) {
       console.error('Error scheduling all reminders:', error);
     }
@@ -271,6 +306,118 @@ class ReminderService {
     } catch (error) {
       console.error('Error scheduling elder reminders:', error);
     }
+  }
+
+  // Live watch to auto-reschedule when data changes
+  startWatchingElder(elderUid: string): void {
+    if (this.watchTargetElder === elderUid) return; // already watching
+    this.stopWatching();
+    this.watchTargetElder = elderUid;
+    const setup = async () => {
+      const familyUid = await this.resolveConnectedFamilyUid(elderUid);
+      const uids = familyUid && familyUid !== elderUid ? [elderUid, familyUid] : [elderUid];
+      // Medicines
+      const medsUnsub = onSnapshot(
+        uids.length > 1
+          ? query(collection(db, 'medicines'), where('uid', 'in', uids))
+          : query(collection(db, 'medicines'), where('uid', '==', uids[0]!)),
+        () => this.debounceReschedule(elderUid)
+      );
+      // Routines
+      const routinesUnsub = onSnapshot(
+        uids.length > 1
+          ? query(collection(db, 'dailyRoutines'), where('uid', 'in', uids))
+          : query(collection(db, 'dailyRoutines'), where('uid', '==', uids[0]!)),
+        () => this.debounceReschedule(elderUid)
+      );
+      // Stock (only elder-owned)
+      const stockUnsub = onSnapshot(
+        query(collection(db, 'medicineStocks'), where('uid', '==', elderUid)),
+        () => this.debounceReschedule(elderUid)
+      );
+      this.watchUnsubs = [medsUnsub, routinesUnsub, stockUnsub];
+      // Initial schedule
+      this.debounceReschedule(elderUid);
+    };
+    setup();
+  }
+
+  async startWatchingForFamily(familyUid: string): Promise<void> {
+    // Resolve elder and start watching elder
+    const elderUid = await this.resolveElderForFamily(familyUid);
+    if (elderUid) this.startWatchingElder(elderUid);
+  }
+
+  stopWatching(): void {
+    this.watchUnsubs.forEach(u => {
+      try { u(); } catch {}
+    });
+    this.watchUnsubs = [];
+    this.watchTargetElder = null;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+  }
+
+  private debounceReschedule = (elderUid: string) => {
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(() => {
+      this.scheduleAllReminders(elderUid).catch(err => console.error('Reschedule failed', err));
+    }, 400);
+  };
+
+  private async resolveConnectedFamilyUid(elderUid: string): Promise<string | null> {
+    try {
+      const uRef = doc(collection(db, 'users'), elderUid);
+      const uDoc = await getDoc(uRef);
+      if (!uDoc.exists()) return null;
+      const data = uDoc.data() as any;
+      const raw = data?.connectedTo ? String(data.connectedTo) : null;
+      if (!raw) return null;
+      // by doc id
+      const famDoc = await getDoc(doc(collection(db, 'users'), raw));
+      if (famDoc.exists()) return famDoc.id;
+      // by uid field
+      const byUid = await getDocs(query(collection(db, 'users'), where('uid', '==', raw)));
+      if (!byUid.empty) return byUid.docs[0].id;
+      // by phone variants
+      const exact = await getDocs(query(collection(db, 'users'), where('phone', '==', raw)));
+      if (!exact.empty) return exact.docs[0].id;
+      const digits = raw.replace(/\D/g, '');
+      const last10 = digits.slice(-10);
+      if (last10) {
+        const by10 = await getDocs(query(collection(db, 'users'), where('phone', '==', last10)));
+        if (!by10.empty) return by10.docs[0].id;
+        if (/^\d{10}$/.test(last10)) {
+          const byNum = await getDocs(query(collection(db, 'users'), where('phone', '==', Number(last10) as any)));
+          if (!byNum.empty) return byNum.docs[0].id;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveElderForFamily(familyUid: string): Promise<string | null> {
+    try {
+      // by connectedElders
+      const byArr = await getDocs(query(collection(db, 'users'), where('connectedElders', 'array-contains', familyUid)));
+      if (!byArr.empty) return byArr.docs[0].id;
+      // by elder.connectedTo == familyUid
+      const byField = await getDocs(query(collection(db, 'users'), where('connectedTo', '==', familyUid)));
+      if (!byField.empty) return byField.docs[0].id;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private formatTime(hour: number, minute: number, period: 'AM'|'PM'): string {
+    const h = Math.max(1, Math.min(12, hour));
+    const m = String(minute).padStart(2, '0');
+    return `${h}:${m} ${period}`;
   }
 
   // Cancel all scheduled notifications
