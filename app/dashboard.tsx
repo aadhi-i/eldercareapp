@@ -151,7 +151,13 @@ export default function Dashboard() {
           if (elderProfileData) {
             const elderUid = elderProfileData.uid || elderProfileData.id;
             const familyUid = elderProfileData.connectedTo || familyData?.uid || familyData?.id;
-            await loadDashboardCollections(elderUid, familyUid);
+            
+            // For elderly users, use their own UID; for family users, use the elder's UID
+            const targetElderUid = currentUserData.role === 'elder' 
+              ? (currentUserData.uid || currentUserData.id) 
+              : elderUid;
+            
+            await loadDashboardCollections(targetElderUid, familyUid);
 
             // Start reminder watching (auto-reschedules on data changes)
             try {
@@ -335,8 +341,16 @@ export default function Dashboard() {
   const loadDashboardCollections = async (elderUid?: string, familyUid?: string) => {
     try {
       const uids: string[] = [];
-      if (elderUid) uids.push(String(elderUid));
-      if (familyUid && familyUid !== elderUid) uids.push(String(familyUid));
+      
+      // For elderly users: prioritize their own data, then add family data if available
+      // For family users: show elder's data
+      if (currentUserRole === 'elder') {
+        if (elderUid) uids.push(String(elderUid));
+        if (familyUid && familyUid !== elderUid) uids.push(String(familyUid));
+      } else if (currentUserRole === 'family') {
+        if (elderUid) uids.push(String(elderUid));
+        if (familyUid && familyUid !== elderUid) uids.push(String(familyUid));
+      }
 
       // Load medicines
       const meds: any[] = [];
@@ -375,10 +389,10 @@ export default function Dashboard() {
         });
       }
 
-      // Upcoming Medications render like "Family meds summary": show name, dosage, and all scheduled times
-      const medsForUpcoming = (currentUserRole === 'elder' && familyUid)
-        ? meds.filter((m: any) => String(m?.uid || '') === String(familyUid))
-        : meds;
+      // Upcoming Medications: show elder's own data for elderly users, elder's data for family users
+      const medsForUpcoming = (currentUserRole === 'family')
+        ? meds.filter((m: any) => String(m?.uid || '') === String(elderUid))
+        : meds.filter((m: any) => String(m?.uid || '') === String(elderUid));
       const upcomingMedList: any[] = medsForUpcoming.map((m: any) => {
         const timesArr = Array.isArray(m?.times) ? m.times : [];
         const timesStr = timesArr
@@ -393,10 +407,10 @@ export default function Dashboard() {
       });
       setUpcomingMedications(upcomingMedList.slice(0, 3));
 
-      // Upcoming Routines: show like summary with all times
-      const routsForUpcoming = (currentUserRole === 'elder' && familyUid)
-        ? routs.filter((r: any) => String(r?.uid || '') === String(familyUid))
-        : routs;
+      // Upcoming Routines: show elder's own data for elderly users, elder's data for family users
+      const routsForUpcoming = (currentUserRole === 'family')
+        ? routs.filter((r: any) => String(r?.uid || '') === String(elderUid))
+        : routs.filter((r: any) => String(r?.uid || '') === String(elderUid));
       const upcomingRoutList: any[] = routsForUpcoming.map((r: any) => {
         const timesArr = Array.isArray(r?.times) ? r.times : [];
         const timesStr = timesArr.map((t: any) => formatTime(t)).join(', ');
