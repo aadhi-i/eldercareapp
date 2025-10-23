@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, PermissionsAndroid, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../components/AuthProvider';
@@ -35,6 +36,7 @@ export default function Dashboard() {
   const [upcomingMedications, setUpcomingMedications] = useState<any[]>([]);
   const [upcomingRoutines, setUpcomingRoutines] = useState<any[]>([]);
   const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
+  const watchersRef = useRef<Array<() => void>>([]);
 
   // Voice/TTS state
   const [voiceActive, setVoiceActive] = useState(false);
@@ -189,8 +191,48 @@ export default function Dashboard() {
   useEffect(() => {
     return () => {
       try { reminderService.stopWatching(); } catch {}
+      try { stopDashboardWatchers(); } catch {}
     };
   }, []);
+
+  // Ensure refetch on screen focus
+  useFocusEffect(
+    React.useCallback(() => {
+      // When screen gains focus, if no watchers are active, try to re-attach based on current elder/family state
+      (async () => {
+        try {
+          const usersRef = collection(db, 'users');
+          let currentUserData: any | null = null;
+          if (auth.currentUser) {
+            const uid = auth.currentUser.uid;
+            const byIdSnap = await getDoc(doc(usersRef, uid));
+            if (byIdSnap.exists()) currentUserData = byIdSnap.data();
+          }
+          if (!currentUserData) return;
+          const role = currentUserData.role;
+          let elderUid: string | null = null;
+          let familyUid: string | null = null;
+          if (role === 'elder') {
+            elderUid = currentUserData.uid || currentUserData.id;
+            familyUid = currentUserData.connectedTo || null;
+          } else {
+            familyUid = currentUserData.uid;
+            if (currentUserData.connectedElders && currentUserData.connectedElders.length > 0) {
+              elderUid = currentUserData.connectedElders[0];
+            } else {
+              const elderSnap = await getDocs(query(usersRef, where('connectedTo', '==', currentUserData.uid)));
+              if (!elderSnap.empty) elderUid = elderSnap.docs[0].id;
+            }
+          }
+          const uids: string[] = [];
+          if (elderUid) uids.push(String(elderUid));
+          if (familyUid && String(familyUid) !== String(elderUid)) uids.push(String(familyUid));
+          if (uids.length) startDashboardWatchers(uids);
+        } catch {}
+      })();
+      return () => {};
+    }, [])
+  );
 
   // Fall toggle loaded in DrawerLayout
 
@@ -389,39 +431,79 @@ export default function Dashboard() {
         });
       }
 
-      // Upcoming Medications: show elder's own data for elderly users, elder's data for family users
-      const medsForUpcoming = (currentUserRole === 'family')
-        ? meds.filter((m: any) => String(m?.uid || '') === String(elderUid))
-        : meds.filter((m: any) => String(m?.uid || '') === String(elderUid));
-      const upcomingMedList: any[] = medsForUpcoming.map((m: any) => {
-        const timesArr = Array.isArray(m?.times) ? m.times : [];
-        const timesStr = timesArr
-          .map((t: any) => formatTime(t))
-          .filter(Boolean)
-          .join(', ');
-        return {
-          name: m?.name,
-          dosage: m?.dosage,
-          time: timesStr,
-        };
+      // Upcoming Medications (prioritized by next time soonest)
+      // Include entries created under elder or family uid so family sees the full elder schedule
+      const medsForUpcoming = meds.filter((m: any) => {
+        const uid = String(m?.uid || '');
+        return uids.includes(uid);
       });
-      setUpcomingMedications(upcomingMedList.slice(0, 3));
+      const now = new Date();
+      const medOccurrences: Array<{ name: string; dosage?: string; time: string; nextAt: number }> = [];
+      for (const m of medsForUpcoming) {
+        // Support new schema times: [{hour, minute, period}] and legacy timings: ["9:00 AM", ...]
+        let tArr: any[] = Array.isArray(m?.times) ? m.times : [];
+        if ((!tArr || tArr.length === 0) && Array.isArray(m?.timings)) {
+          tArr = m.timings
+            .map((s: string) => parseStringTime(s))
+            .filter(Boolean) as any[];
+        }
+        for (const t of tArr) {
+          const hour = Number(t?.hour ?? 0);
+          const minute = Number(t?.minute ?? 0);
+          const period = String(t?.period ?? '').toUpperCase();
+          // Convert to 24h
+          let h24 = hour;
+          if (period === 'PM' && h24 !== 12) h24 += 12;
+          if (period === 'AM' && h24 === 12) h24 = 0;
+          const candidate = new Date(now);
+          candidate.setHours(h24, minute, 0, 0);
+          if (candidate.getTime() < now.getTime()) candidate.setDate(candidate.getDate() + 1);
+          medOccurrences.push({
+            name: String(m?.name ?? ''),
+            dosage: m?.dosage,
+            time: formatTime(t),
+            nextAt: candidate.getTime(),
+          });
+        }
+      }
+      medOccurrences.sort((a, b) => a.nextAt - b.nextAt);
+      setUpcomingMedications(medOccurrences.slice(0, 3));
 
-      // Upcoming Routines: show elder's own data for elderly users, elder's data for family users
-      const routsForUpcoming = (currentUserRole === 'family')
-        ? routs.filter((r: any) => String(r?.uid || '') === String(elderUid))
-        : routs.filter((r: any) => String(r?.uid || '') === String(elderUid));
-      const upcomingRoutList: any[] = routsForUpcoming.map((r: any) => {
-        const timesArr = Array.isArray(r?.times) ? r.times : [];
-        const timesStr = timesArr.map((t: any) => formatTime(t)).join(', ');
-        return { title: r?.title, time: timesStr };
+      // Upcoming Routines (prioritized by next time soonest)
+      const routsForUpcoming = routs.filter((r: any) => {
+        const uid = String(r?.uid || '');
+        return uids.includes(uid);
       });
-      setUpcomingRoutines(upcomingRoutList.slice(0, 3));
+      const routOccurrences: Array<{ title: string; time: string; nextAt: number }> = [];
+      for (const r of routsForUpcoming) {
+        // Support either r.times (array) or r.time (single string like "9:30 AM")
+        const timesArr = Array.isArray(r?.times) ? r.times : (r?.time ? [r.time] : []);
+        for (const t of timesArr) {
+          let hour = 0; let minute = 0; let period = 'AM';
+          if (typeof t === 'string') {
+            const [tm, per] = t.split(' ');
+            const [h, m] = (tm || '').split(':').map((x) => Number(x));
+            hour = h || 0; minute = m || 0; period = String(per || 'AM').toUpperCase();
+          } else {
+            hour = Number(t?.hour ?? 0);
+            minute = Number(t?.minute ?? 0);
+            period = String(t?.period ?? 'AM').toUpperCase();
+          }
+          let h24 = hour; if (period === 'PM' && h24 !== 12) h24 += 12; if (period === 'AM' && h24 === 12) h24 = 0;
+          const candidate = new Date(now); candidate.setHours(h24, minute, 0, 0); if (candidate.getTime() < now.getTime()) candidate.setDate(candidate.getDate() + 1);
+          const timeStr = typeof t === 'string' ? t : formatTime(t);
+          routOccurrences.push({ title: String(r?.title ?? r?.name ?? ''), time: timeStr, nextAt: candidate.getTime() });
+        }
+      }
+      routOccurrences.sort((a, b) => a.nextAt - b.nextAt);
+      setUpcomingRoutines(routOccurrences.slice(0, 3));
 
       // Compute low stock: by days left ascending using medicines' frequency
       const low: any[] = [];
       meds.forEach((m) => {
-        const timesPerDay = Array.isArray(m?.times) ? m.times.length : 0;
+        let timesPerDay = 0;
+        if (Array.isArray(m?.times) && m.times.length) timesPerDay = m.times.length;
+        else if (Array.isArray(m?.timings) && m.timings.length) timesPerDay = m.timings.length;
         const st = stocks[m.id];
         if (!st) return;
         if (timesPerDay <= 0) return;
@@ -431,6 +513,10 @@ export default function Dashboard() {
       });
       low.sort((a, b) => a.stock - b.stock);
       setLowStockAlerts(low.slice(0, 3));
+
+      // Start live watchers so returning to this screen always reflects Firestore
+      startDashboardWatchers(uids);
+      startUserWatchers(currentUserRole, elderUid, familyUid);
     } catch (error) {
       console.error('Error loading dashboard collections:', error);
     }
@@ -438,6 +524,148 @@ export default function Dashboard() {
 
   // Format helper
   const formatTime = (t: any) => `${String(t?.hour ?? '').padStart(2, '0')}:${String(t?.minute ?? '').padStart(2, '0')} ${t?.period ?? ''}`;
+  const parseStringTime = (timeString: string): { hour: number; minute: number; period: 'AM' | 'PM' } | null => {
+    try {
+      const [time, per] = String(timeString || '').trim().split(' ');
+      const [hStr, mStr] = (time || '').split(':');
+      if (!hStr || !mStr) return null;
+      let hour = Number(hStr);
+      const minute = Number(mStr);
+      const period = (per?.toUpperCase() === 'PM' || per?.toUpperCase() === 'AM') ? (per.toUpperCase() as 'AM' | 'PM') : ('AM');
+      return { hour, minute, period };
+    } catch { return null; }
+  };
+
+  // Live dashboard watchers
+  const startDashboardWatchers = (uids: string[]) => {
+    // Clear any existing
+    stopDashboardWatchers();
+    if (!uids || uids.length === 0) return;
+
+    let medsLocal: any[] = [];
+    let routsLocal: any[] = [];
+    let stocksLocal: Record<string, any> = {};
+
+    const recompute = () => {
+      const now = new Date();
+      // Upcoming meds
+      const medOcc: Array<{ name: string; dosage?: string; time: string; nextAt: number }> = [];
+      for (const m of medsLocal.filter((m) => uids.includes(String(m?.uid || '')))) {
+        let tArr: any[] = Array.isArray(m?.times) ? m.times : [];
+        if ((!tArr || tArr.length === 0) && Array.isArray(m?.timings)) tArr = m.timings.map((s: string) => parseStringTime(s)).filter(Boolean) as any[];
+        for (const t of tArr) {
+          const hour = Number(t?.hour ?? 0);
+          const minute = Number(t?.minute ?? 0);
+          const period = String(t?.period ?? '').toUpperCase();
+          let h24 = hour; if (period === 'PM' && h24 !== 12) h24 += 12; if (period === 'AM' && h24 === 12) h24 = 0;
+          const cand = new Date(now); cand.setHours(h24, minute, 0, 0); if (cand.getTime() < Date.now()) cand.setDate(cand.getDate() + 1);
+          medOcc.push({ name: String(m?.name ?? ''), dosage: m?.dosage, time: formatTime(t), nextAt: cand.getTime() });
+        }
+      }
+      medOcc.sort((a, b) => a.nextAt - b.nextAt);
+      setUpcomingMedications(medOcc.slice(0, 3));
+
+      // Upcoming routines
+      const routOcc: Array<{ title: string; time: string; nextAt: number }> = [];
+      for (const r of routsLocal.filter((r) => uids.includes(String(r?.uid || '')))) {
+        const timesArr = Array.isArray(r?.times) ? r.times : (r?.time ? [r.time] : []);
+        for (const t of timesArr) {
+          let hour = 0, minute = 0; let period = 'AM';
+          if (typeof t === 'string') {
+            const [tm, per] = t.split(' '); const [h, m] = (tm || '').split(':').map(Number);
+            hour = h || 0; minute = m || 0; period = String(per || 'AM').toUpperCase();
+          } else { hour = Number(t?.hour ?? 0); minute = Number(t?.minute ?? 0); period = String(t?.period ?? 'AM').toUpperCase(); }
+          let h24 = hour; if (period === 'PM' && h24 !== 12) h24 += 12; if (period === 'AM' && h24 === 12) h24 = 0;
+          const cand = new Date(now); cand.setHours(h24, minute, 0, 0); if (cand.getTime() < Date.now()) cand.setDate(cand.getDate() + 1);
+          const timeStr = typeof t === 'string' ? t : formatTime(t);
+          routOcc.push({ title: String(r?.title ?? r?.name ?? ''), time: timeStr, nextAt: cand.getTime() });
+        }
+      }
+      routOcc.sort((a, b) => a.nextAt - b.nextAt);
+      setUpcomingRoutines(routOcc.slice(0, 3));
+
+      // Low stock
+      const low: any[] = [];
+      medsLocal.forEach((m) => {
+        let timesPerDay = 0;
+        if (Array.isArray(m?.times) && m.times.length) timesPerDay = m.times.length;
+        else if (Array.isArray(m?.timings) && m.timings.length) timesPerDay = m.timings.length;
+        const st = stocksLocal[m.id]; if (!st) return; if (timesPerDay <= 0) return;
+        const qty = Number(st.quantity || 0);
+        const daysLeft = Math.floor(qty / Math.max(1, timesPerDay));
+        low.push({ name: m.name, stock: daysLeft, quantity: qty, timesPerDay });
+      });
+      low.sort((a, b) => a.stock - b.stock);
+      setLowStockAlerts(low.slice(0, 3));
+    };
+
+    const medsRef = collection(db, 'medicines');
+    const medsQuery = uids.length > 1 ? query(medsRef, where('uid', 'in', uids)) : query(medsRef, where('uid', '==', uids[0]));
+    const unsubMeds = onSnapshot(medsQuery, (snap: any) => {
+      medsLocal = snap.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }));
+      setMedications(medsLocal);
+      recompute();
+    });
+
+    const routRef = collection(db, 'dailyRoutines');
+    const routQuery = uids.length > 1 ? query(routRef, where('uid', 'in', uids)) : query(routRef, where('uid', '==', uids[0]));
+    const unsubRouts = onSnapshot(routQuery, (snap: any) => {
+      routsLocal = snap.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }));
+      setRoutines(routsLocal);
+      recompute();
+    });
+
+    const stRef = collection(db, 'medicineStocks');
+    const stQuery = query(stRef, where('uid', '==', uids[0]));
+    const unsubStocks = onSnapshot(stQuery, (snap: any) => {
+      const map: Record<string, any> = {};
+      snap.docs.forEach((d: any) => {
+        const data = { id: d.id, ...(d.data() as any) };
+        const mid = data.medicineId;
+        const prev = map[mid];
+        if (!prev || (Number(data.lastDecrementDate || 0) > Number(prev.lastDecrementDate || 0))) map[mid] = data;
+      });
+      stocksLocal = map;
+      recompute();
+    });
+
+    watchersRef.current = [unsubMeds, unsubRouts, unsubStocks];
+  };
+
+  const stopDashboardWatchers = () => {
+    watchersRef.current.forEach((u) => { try { u(); } catch {} });
+    watchersRef.current = [];
+  };
+
+  // Watch user documents to keep welcome header name up-to-date
+  const startUserWatchers = (role: 'elder' | 'family' | null, elderUid?: string, familyUid?: string | null) => {
+    if (!role) return;
+    const usersRef = collection(db, 'users');
+    // Current user doc
+    if (auth.currentUser) {
+      const meUnsub = onSnapshot(doc(usersRef, auth.currentUser.uid), (snap: any) => {
+        const data = snap.exists() ? snap.data() : null;
+        if (!data) return;
+        if (role === 'elder') setElderData((prev: any) => ({ ...(prev || {}), ...data }));
+        else setFamilyData((prev: any) => ({ ...(prev || {}), ...data }));
+      });
+      watchersRef.current.push(meUnsub);
+    }
+    // Elder doc
+    if (elderUid) {
+      const elderUnsub = onSnapshot(doc(usersRef, String(elderUid)), (snap: any) => {
+        if (snap.exists()) setElderData((prev: any) => ({ ...(prev || {}), ...snap.data() }));
+      });
+      watchersRef.current.push(elderUnsub);
+    }
+    // Family doc (connected counterpart)
+    if (familyUid) {
+      const famUnsub = onSnapshot(doc(usersRef, String(familyUid)), (snap: any) => {
+        if (snap.exists()) setFamilyData((prev: any) => ({ ...(prev || {}), ...snap.data() }));
+      });
+      watchersRef.current.push(famUnsub);
+    }
+  };
   
   // Assistant: build a short, friendly, context-aware message
   const buildAssistantMessage = () => {

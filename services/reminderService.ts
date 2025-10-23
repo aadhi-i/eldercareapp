@@ -5,10 +5,14 @@ import { db } from '../lib/firebaseConfig';
 // Configure notification behavior
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
+    // Backwards-compatible fields
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
-  }),
+    // Newer fields for SDK 54+/expo-notifications >= 0.32
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }) as any,
 });
 
 export interface Medicine {
