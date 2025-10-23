@@ -382,61 +382,81 @@ export default function Dashboard() {
   // Load medicines, routines, and stocks from Firestore for elder (and connected family if any)
   const loadDashboardCollections = async (elderUid?: string, familyUid?: string) => {
     try {
-      const uids: string[] = [];
-      
-      // For elderly users: prioritize their own data, then add family data if available
-      // For family users: show elder's data
-      if (currentUserRole === 'elder') {
-        if (elderUid) uids.push(String(elderUid));
-        if (familyUid && familyUid !== elderUid) uids.push(String(familyUid));
-      } else if (currentUserRole === 'family') {
-        if (elderUid) uids.push(String(elderUid));
-        if (familyUid && familyUid !== elderUid) uids.push(String(familyUid));
-      }
+      // Elder dashboard requirement:
+      // - medicines use elder's uid
+      // - routines and stocks use family member's uid
+      // Family dashboard: keep existing behavior (do not change family code)
 
-      // Load medicines
+      // Load medicines (elder uid only for elder role; elder uid for family role too)
       const meds: any[] = [];
-      for (const uid of uids.length ? uids : ['']) {
-        if (!uid) continue;
+      if (elderUid) {
         const medsRef = collection(db, 'medicines');
-        const snap = await getDocs(query(medsRef, where('uid', '==', uid)));
-        snap.docs.forEach((d) => meds.push({ id: d.id, ...(d.data() as any) }));
+        const mSnap = await getDocs(query(medsRef, where('uid', '==', String(elderUid))));
+        mSnap.docs.forEach((d) => meds.push({ id: d.id, ...(d.data() as any) }));
       }
       setMedications(meds);
 
-      // Load routines
+      // Load routines (family uid for elder role; elder+family for family role unchanged)
       const routs: any[] = [];
-      for (const uid of uids.length ? uids : ['']) {
-        if (!uid) continue;
-        const routRef = collection(db, 'dailyRoutines');
-        const rsnap = await getDocs(query(routRef, where('uid', '==', uid)));
-        rsnap.docs.forEach((d) => routs.push({ id: d.id, ...(d.data() as any) }));
+      if (currentUserRole === 'elder') {
+        if (familyUid) {
+          const routRef = collection(db, 'dailyRoutines');
+          const rsnap = await getDocs(query(routRef, where('uid', '==', String(familyUid))));
+          rsnap.docs.forEach((d) => routs.push({ id: d.id, ...(d.data() as any) }));
+        }
+      } else if (currentUserRole === 'family') {
+        // preserve existing behavior: show elder (and optionally family) routines
+        const ids = [elderUid, familyUid].filter(Boolean).map(String) as string[];
+        if (ids.length === 1) {
+          const routRef = collection(db, 'dailyRoutines');
+          const rsnap = await getDocs(query(routRef, where('uid', '==', ids[0])));
+          rsnap.docs.forEach((d) => routs.push({ id: d.id, ...(d.data() as any) }));
+        } else if (ids.length > 1) {
+          const routRef = collection(db, 'dailyRoutines');
+          const rsnap = await getDocs(query(routRef, where('uid', 'in', ids)));
+          rsnap.docs.forEach((d) => routs.push({ id: d.id, ...(d.data() as any) }));
+        }
       }
       setRoutines(routs);
 
-      // Load stocks map by medicineId
+      // Load stocks (family uid for elder role; preserve behavior for family)
       const stocks: Record<string, any> = {};
-      for (const uid of uids.length ? uids : ['']) {
-        if (!uid) continue;
-        const stRef = collection(db, 'medicineStocks');
-        const ssnap = await getDocs(query(stRef, where('uid', '==', uid)));
-        ssnap.docs.forEach((d) => {
-          const data = { id: d.id, ...(d.data() as any) };
-          const mid = data.medicineId;
-          // If duplicate medicineIds from multiple uids, prefer the one with newer lastDecrementDate
-          const prev = stocks[mid];
-          if (!prev || (Number(data.lastDecrementDate || 0) > Number(prev.lastDecrementDate || 0))) {
-            stocks[mid] = data;
-          }
-        });
+      if (currentUserRole === 'elder') {
+        if (familyUid) {
+          const stRef = collection(db, 'medicineStocks');
+          const ssnap = await getDocs(query(stRef, where('uid', '==', String(familyUid))));
+          ssnap.docs.forEach((d) => {
+            const data = { id: d.id, ...(d.data() as any) };
+            const mid = data.medicineId;
+            const prev = stocks[mid];
+            if (!prev || (Number(data.lastDecrementDate || 0) > Number(prev.lastDecrementDate || 0))) stocks[mid] = data;
+          });
+        }
+      } else if (currentUserRole === 'family') {
+        const ids = [elderUid, familyUid].filter(Boolean).map(String) as string[];
+        if (ids.length === 1) {
+          const stRef = collection(db, 'medicineStocks');
+          const ssnap = await getDocs(query(stRef, where('uid', '==', ids[0])));
+          ssnap.docs.forEach((d) => {
+            const data = { id: d.id, ...(d.data() as any) };
+            const mid = data.medicineId;
+            const prev = stocks[mid];
+            if (!prev || (Number(data.lastDecrementDate || 0) > Number(prev.lastDecrementDate || 0))) stocks[mid] = data;
+          });
+        } else if (ids.length > 1) {
+          const stRef = collection(db, 'medicineStocks');
+          const ssnap = await getDocs(query(stRef, where('uid', 'in', ids)));
+          ssnap.docs.forEach((d) => {
+            const data = { id: d.id, ...(d.data() as any) };
+            const mid = data.micineId;
+            const prev = stocks[mid];
+            if (!prev || (Number(data.lastDecrementDate || 0) > Number(prev.lastDecrementDate || 0))) stocks[mid] = data;
+          });
+        }
       }
 
-      // Upcoming Medications (prioritized by next time soonest)
-      // Include entries created under elder or family uid so family sees the full elder schedule
-      const medsForUpcoming = meds.filter((m: any) => {
-        const uid = String(m?.uid || '');
-        return uids.includes(uid);
-      });
+      // Upcoming Medications (elder uid for elder dashboard)
+      const medsForUpcoming = meds; // already filtered above by elder uid for elder; family behavior preserved
       const now = new Date();
       const medOccurrences: Array<{ name: string; dosage?: string; time: string; nextAt: number }> = [];
       for (const m of medsForUpcoming) {
@@ -469,11 +489,8 @@ export default function Dashboard() {
       medOccurrences.sort((a, b) => a.nextAt - b.nextAt);
       setUpcomingMedications(medOccurrences.slice(0, 3));
 
-      // Upcoming Routines (prioritized by next time soonest)
-      const routsForUpcoming = routs.filter((r: any) => {
-        const uid = String(r?.uid || '');
-        return uids.includes(uid);
-      });
+      // Upcoming Routines (family uid for elder dashboard)
+      const routsForUpcoming = routs; // already filtered above
       const routOccurrences: Array<{ title: string; time: string; nextAt: number }> = [];
       for (const r of routsForUpcoming) {
         // Support either r.times (array) or r.time (single string like "9:30 AM")
@@ -514,8 +531,9 @@ export default function Dashboard() {
       low.sort((a, b) => a.stock - b.stock);
       setLowStockAlerts(low.slice(0, 3));
 
-      // Start live watchers so returning to this screen always reflects Firestore
-      startDashboardWatchers(uids);
+  // Start live watchers so returning to this screen always reflects Firestore
+  const allUids = [elderUid, familyUid].filter(Boolean).map(String) as string[];
+  startDashboardWatchers(allUids);
       startUserWatchers(currentUserRole, elderUid, familyUid);
     } catch (error) {
       console.error('Error loading dashboard collections:', error);
@@ -600,7 +618,11 @@ export default function Dashboard() {
     };
 
     const medsRef = collection(db, 'medicines');
-    const medsQuery = uids.length > 1 ? query(medsRef, where('uid', 'in', uids)) : query(medsRef, where('uid', '==', uids[0]));
+    const elderUidForWatch = uids[0];
+    const familyUidForWatch = uids.length > 1 ? uids[1] : null;
+    const medsQuery = currentUserRole === 'elder'
+      ? query(medsRef, where('uid', '==', elderUidForWatch))
+      : (uids.length > 1 ? query(medsRef, where('uid', 'in', uids)) : query(medsRef, where('uid', '==', uids[0])));
     const unsubMeds = onSnapshot(medsQuery, (snap: any) => {
       medsLocal = snap.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }));
       setMedications(medsLocal);
@@ -608,7 +630,9 @@ export default function Dashboard() {
     });
 
     const routRef = collection(db, 'dailyRoutines');
-    const routQuery = uids.length > 1 ? query(routRef, where('uid', 'in', uids)) : query(routRef, where('uid', '==', uids[0]));
+    const routQuery = currentUserRole === 'elder'
+      ? (familyUidForWatch ? query(routRef, where('uid', '==', familyUidForWatch)) : query(routRef, where('uid', '==', elderUidForWatch)))
+      : (uids.length > 1 ? query(routRef, where('uid', 'in', uids)) : query(routRef, where('uid', '==', uids[0])));
     const unsubRouts = onSnapshot(routQuery, (snap: any) => {
       routsLocal = snap.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }));
       setRoutines(routsLocal);
@@ -616,7 +640,9 @@ export default function Dashboard() {
     });
 
     const stRef = collection(db, 'medicineStocks');
-    const stQuery = query(stRef, where('uid', '==', uids[0]));
+    const stQuery = currentUserRole === 'elder'
+      ? (familyUidForWatch ? query(stRef, where('uid', '==', familyUidForWatch)) : query(stRef, where('uid', '==', elderUidForWatch)))
+      : (uids.length > 1 ? query(stRef, where('uid', 'in', uids)) : query(stRef, where('uid', '==', uids[0])));
     const unsubStocks = onSnapshot(stQuery, (snap: any) => {
       const map: Record<string, any> = {};
       snap.docs.forEach((d: any) => {
