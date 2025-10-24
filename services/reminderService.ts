@@ -28,7 +28,8 @@ export interface Routine {
   id?: string;
   uid?: string;
   name: string;
-  time: string;
+  time?: string; // legacy single time like "9:00 AM"
+  times?: Array<{ hour: number; minute: number; period: 'AM' | 'PM' } | string>; // current flexible
   type: string;
   description?: string;
 }
@@ -116,9 +117,9 @@ class ReminderService {
   }
 
   // Schedule routine reminder (20 minutes before)
-  async scheduleRoutineReminder(routine: Routine): Promise<string | null> {
+  async scheduleRoutineReminder(routine: Routine, timeInput?: string | { hour: number; minute: number; period?: 'AM' | 'PM' } | null): Promise<string | null> {
     try {
-      const parsed = this.parseTimeString(routine.time);
+      const parsed = this.parseTime(timeInput ?? routine.time);
       if (!parsed) return null;
   const offsetMinutes = 20;
   const reminderTime = new Date(parsed.getTime() - offsetMinutes * 60 * 1000);
@@ -127,11 +128,11 @@ class ReminderService {
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: '📅 Routine Reminder',
-          body: `${routine.name} starts at ${routine.time}`,
+          body: `${routine.name} starts at ${this.displayTime(timeInput ?? routine.time)}`,
           data: {
             type: 'routine',
             routineName: routine.name,
-            time: routine.time,
+            time: this.displayTime(timeInput ?? routine.time),
             description: routine.description,
           },
         },
@@ -200,30 +201,50 @@ class ReminderService {
   }
 
   // Parse time string (e.g., "9:00 AM", "14:30", "2:30 PM")
-  private parseTimeString(timeString: string): Date | null {
+  private parseTime(input: any): Date | null {
     try {
       const now = new Date();
-      const [time, period] = timeString.split(' ');
-      
-      let [hours, minutes] = time.split(':').map(Number);
-      
-      // Handle AM/PM
-      if (period) {
-        if (period.toUpperCase() === 'PM' && hours !== 12) {
-          hours += 12;
-        } else if (period.toUpperCase() === 'AM' && hours === 12) {
-          hours = 0;
-        }
+      // Support object format {hour, minute, period}
+      if (input && typeof input === 'object') {
+        let h = Number(input.hour ?? 0);
+        const m = Number(input.minute ?? 0);
+        const p = String(input.period ?? '').toUpperCase();
+        if (p === 'PM' && h !== 12) h += 12; if (p === 'AM' && h === 12) h = 0;
+        const d = new Date(now); d.setHours(h, m, 0, 0); return d;
       }
-      
+      // If not provided or not a string, bail safely
+      if (!input || typeof input !== 'string') return null;
+      const raw = input.trim();
+      if (!raw) return null;
+      const parts = raw.split(' ');
+      const time = parts[0] ?? '';
+      const period = (parts[1] ?? '').toUpperCase();
+      const segs = time.split(':');
+      const hoursNum = Number(segs[0] ?? 0);
+      const minutesNum = Number(segs[1] ?? 0);
+      let hours = isNaN(hoursNum) ? 0 : hoursNum;
+      const minutes = isNaN(minutesNum) ? 0 : minutesNum;
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
       const notificationTime = new Date(now);
       notificationTime.setHours(hours, minutes, 0, 0);
-      
       return notificationTime;
     } catch (error) {
-      console.error('Error parsing time string:', error);
+      console.error('Error parsing time value:', error);
       return null;
     }
+  }
+
+  private displayTime(input: any): string {
+    if (input && typeof input === 'object') {
+      const h = Number(input.hour ?? 0);
+      const m = String(Number(input.minute ?? 0)).padStart(2, '0');
+      const p = String(input.period ?? '').toUpperCase() || (h >= 12 ? 'PM' : 'AM');
+      const h12 = ((h % 12) || 12);
+      return `${h12}:${m} ${p}`;
+    }
+    if (typeof input === 'string') return input;
+    return '';
   }
 
   private offsetHourMinute(hour24: number, minute: number, offsetMinutes: number): { hour: number; minute: number } {
@@ -272,7 +293,14 @@ class ReminderService {
         : await getDocs(query(collection(db, 'dailyRoutines'), where('uid', '==', uids[0])));
       const routines: Routine[] = routinesSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       for (const r of routines) {
-        await this.scheduleRoutineReminder(r);
+        if (Array.isArray(r.times) && r.times.length) {
+          for (const t of r.times) {
+            const timeObj = typeof t === 'string' ? this.parseTime(t) ? t : null : t as any;
+            await this.scheduleRoutineReminder(r, timeObj as any);
+          }
+        } else if (r.time) {
+          await this.scheduleRoutineReminder(r, r.time);
+        }
       }
 
       // Load stock and schedule 1-day alerts

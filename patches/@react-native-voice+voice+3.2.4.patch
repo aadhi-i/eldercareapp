@@ -1,0 +1,9 @@
+diff --git a/node_modules/@react-native-voice/voice/android/build.gradle b/node_modules/@react-native-voice/voice/android/build.gradle
+index 6b3a3d1..0000000 100644
+--- a/node_modules/@react-native-voice/voice/android/build.gradle
++++ b/node_modules/@react-native-voice/voice/android/build.gradle
+@@
+-    implementation "com.android.support:appcompat-v7:${supportVersion}"
++    // Migrate to AndroidX to avoid duplicate classes with androidx.core
++    implementation "androidx.appcompat:appcompat:1.6.1"
+*** End Patch

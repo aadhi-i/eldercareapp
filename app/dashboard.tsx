@@ -1,21 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
+import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
 import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, PermissionsAndroid, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, PermissionsAndroid, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../components/AuthProvider';
 import DrawerLayout from '../components/DrawerLayout';
 import { auth, db } from '../lib/firebaseConfig';
 import { reminderService } from '../services/reminderService';
 
+// Prefer real speech recognition when available; fall back to typed/chip Ask UI otherwise
+const PREFER_REAL_VOICE = true;
+// Runtime check for TextInput availability (fallback to chips if missing)
+const CAN_TEXTINPUT = !!(require('react-native') as any).TextInput;
+
 // Avoid static import so Expo Go doesn't crash if the native module isn't available
-// Detect Expo Go via global expo runtime flag and skip requiring native module there.
+// Detect Expo Go via Constants.appOwnership === 'expo' and only skip require there.
 const Voice: any = (() => {
   try {
-    const isExpoGo = !!(global as any).ExpoModules;
+    const isExpoGo = (Constants as any)?.appOwnership === 'expo';
     if (isExpoGo) return {} as any;
     return require('@react-native-voice/voice').default;
   } catch {
@@ -43,7 +49,12 @@ export default function Dashboard() {
   const [listening, setListening] = useState(false);
   const [sttStatus, setSttStatus] = useState('');
   const [transcript, setTranscript] = useState('');
+  const [assistantText, setAssistantText] = useState('');
+  const [preferredLocale, setPreferredLocale] = useState<string | null>(null);
   const recognizingRef = useRef(false);
+  const mockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [askModeEnabled, setAskModeEnabled] = useState(false);
+  const [askText, setAskText] = useState('');
 
   // Animations
   const glow = useRef(new Animated.Value(0)).current;
@@ -351,32 +362,78 @@ export default function Dashboard() {
   // Start listening with availability and permission checks
   const startListening = async () => {
     try {
-      const available = (await (Voice as any).isAvailable?.()) as any;
-      if (available === false || available === 0 || available == null) {
-        const msg = 'Speech recognition is unavailable here. Use a development build (not Expo Go).';
-        setSttStatus(msg);
-        try { Speech.speak("Sorry, listening isn't available in this build.", { rate: 0.95, pitch: 1.0 }); } catch {}
-        return;
-      }
+      // Check availability (best effort)
+      let available: any = true;
+      try { available = await (Voice as any).isAvailable?.(); } catch {}
+      // Request mic permission on Android
       if (Platform.OS === 'android') {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        );
+        const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
         if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
           setSttStatus('Microphone permission denied.');
           try { Speech.speak('Microphone permission is required to listen.', { rate: 0.95, pitch: 1.0 }); } catch {}
           return;
         }
       }
-      const locale = Platform.select({ ios: 'en-US', android: 'en-US', default: 'en-US' })!;
       recognizingRef.current = true;
+      setListening(true);
       setSttStatus('Starting listener…');
-      await Voice.start(locale);
+
+      // Build locale candidates
+      const sysLocale = (() => {
+        try { return (Intl as any)?.DateTimeFormat?.().resolvedOptions?.().locale as string; } catch { return null; }
+      })();
+      const candidates = Array.from(new Set([
+        preferredLocale || '',
+        sysLocale || '',
+        (sysLocale || '').replace('-', '_'),
+        Platform.OS === 'android' ? 'en-IN' : 'en-US',
+        'en-US',
+        'en_US',
+        'en-GB',
+      ].filter(Boolean)));
+
+      const androidOptions: any = { EXTRA_PARTIAL_RESULTS: true, EXTRA_MAX_RESULTS: 3, REQUEST_PERMISSIONS_AUTO: false };
+      let started = false; let lastErr: any = null;
+      for (const loc of candidates) {
+        try {
+          await (Voice as any).stop?.().catch?.(() => {});
+          await (Voice as any).cancel?.().catch?.(() => {});
+          await (Voice as any).destroy?.().catch?.(() => {});
+          await new Promise((r) => setTimeout(r, 120));
+          if (Platform.OS === 'android') await (Voice as any).start(loc, androidOptions); else await (Voice as any).start(loc);
+          started = true;
+          setSttStatus('Listening…');
+          break;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (!started) {
+        // Fall back to Ask overlay with a clear message
+        setListening(false);
+        setSttStatus('Voice not available on this device. Type your question below…');
+        setAskModeEnabled(true);
+        setTranscript('');
+        recognizingRef.current = false;
+        return;
+      }
     } catch (err) {
       recognizingRef.current = false;
-      setSttStatus('Unable to start listening.');
-      try { Speech.speak('Unable to start listening right now.', { rate: 0.95, pitch: 1.0 }); } catch {}
+      setListening(false);
+      setSttStatus('Unable to start listening. You can type your question below…');
+      setAskModeEnabled(true);
     }
+  };
+
+  const handleAskSubmit = () => {
+    const text = askText.trim();
+    if (!text) return;
+    const lower = text.toLowerCase();
+    setTranscript(lower);
+    setAskText('');
+    setListening(false);
+    setSttStatus('');
+    handleVoiceCommand(lower);
   };
 
   // Load medicines, routines, and stocks from Firestore for elder (and connected family if any)
@@ -751,6 +808,10 @@ export default function Dashboard() {
         Speech.stop();
         setTranscript('');
         setSttStatus('');
+        setAssistantText('');
+        if (mockTimerRef.current) { clearTimeout(mockTimerRef.current); mockTimerRef.current = null; }
+        setAskModeEnabled(false);
+        setAskText('');
         if (recognizingRef.current) {
           // Guarded stop: in Expo Go Voice may be unavailable
           (Voice as any)?.stop?.().catch?.(() => {});
@@ -771,7 +832,7 @@ export default function Dashboard() {
     const isSummary = /(summary|summarize|overview|what's going on|tell me everything|quick update|give me an update)/i.test(text);
 
     if (isMedicinesNow || isAllMedicines) {
-      const parts: string[] = [];
+  const parts: string[] = [];
       if (elderData?.medicines && elderData.medicines.length) {
         const top = elderData.medicines.slice(0, 5).map((m: any) => {
           const times = Array.isArray(m.timings) ? m.timings.join(', ') : '';
@@ -788,6 +849,7 @@ export default function Dashboard() {
         parts.push(`Scheduled by family: ${top.join('; ')}.`);
       }
       const reply = parts.join(' ') || 'No medicines found right now.';
+      setAssistantText(reply);
       Speech.speak(reply, { rate: 0.95, pitch: 1.0 });
       return;
     }
@@ -803,12 +865,15 @@ export default function Dashboard() {
         parts.push(`Routines: ${top.join('; ')}.`);
       }
       const reply = parts.join(' ') || 'No routines found.';
+      setAssistantText(reply);
       Speech.speak(reply, { rate: 0.95, pitch: 1.0 });
       return;
     }
 
     if (isStock) {
-      Speech.speak('Medicine stock status is available in the app. Please check the medicines stock section.', { rate: 0.95, pitch: 1.0 });
+      const reply = 'Medicine stock status is available in the app. Please check the medicines stock section.';
+      setAssistantText(reply);
+      Speech.speak(reply, { rate: 0.95, pitch: 1.0 });
       return;
     }
 
@@ -818,17 +883,23 @@ export default function Dashboard() {
         'Remember to stay hydrated and smile today.',
         'Small steps make big changes. I believe in you.',
       ];
-      Speech.speak(motivations[Math.floor(Math.random() * motivations.length)], { rate: 0.95, pitch: 1.0 });
+      const reply = motivations[Math.floor(Math.random() * motivations.length)];
+      setAssistantText(reply);
+      Speech.speak(reply, { rate: 0.95, pitch: 1.0 });
       return;
     }
 
     if (isSummary) {
-      Speech.speak(buildAssistantMessage(), { rate: 0.95, pitch: 1.0 });
+      const reply = buildAssistantMessage();
+      setAssistantText(reply);
+      Speech.speak(reply, { rate: 0.95, pitch: 1.0 });
       return;
     }
 
     // Neutral fallback guidance
-    Speech.speak('I can help with your medicines, routines, medicine stock note, or a quick summary. What would you like to know?', { rate: 0.95, pitch: 1.0 });
+    const reply = 'I can help with your medicines, routines, medicine stock note, or a quick summary. What would you like to know?';
+    setAssistantText(reply);
+    Speech.speak(reply, { rate: 0.95, pitch: 1.0 });
   };
 
   // Format phone number with country code
@@ -1029,10 +1100,47 @@ export default function Dashboard() {
         </View>
       )}
 
+      {/* Assistant reply captions */}
+      {voiceActive && !!assistantText && (
+        <View style={styles.assistantCaptionContainer} pointerEvents="none">
+          <Text style={styles.assistantCaptionText} numberOfLines={4}>{assistantText}</Text>
+        </View>
+      )}
+
       {voiceActive && !!sttStatus && (
         <View style={styles.statusContainer} pointerEvents="none">
           <Text style={styles.statusText}>{sttStatus}</Text>
         </View>
+      )}
+
+      {/* Ask overlay for hardcoded voice mode: lets user type questions */}
+      {voiceActive && askModeEnabled && (
+        (TextInput as any) ? (
+          <View style={styles.askContainer}>
+            <TextInput
+              style={styles.askInput}
+              placeholder="Ask a question (e.g., what medicines now?)"
+              placeholderTextColor="#bbb"
+              value={askText}
+              onChangeText={setAskText}
+              onSubmitEditing={handleAskSubmit}
+              returnKeyType="send"
+            />
+            <TouchableOpacity style={styles.askButton} onPress={handleAskSubmit}>
+              <Text style={styles.askButtonText}>Ask</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={[styles.askContainer, { backgroundColor: 'rgba(0,0,0,0.65)' }]}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, flex: 1 }}>
+              {['what medicines now', 'list routines', 'medicine stock', 'motivate me', 'summary'].map((q) => (
+                <TouchableOpacity key={q} onPress={() => { setTranscript(q); handleVoiceCommand(q); }} style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#fff', borderRadius: 16 }}>
+                  <Text style={{ color: '#333', fontWeight: '600' }}>{q}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )
       )}
 
       {/* Centered bottom floating mic button for voice assistant */}
@@ -1319,6 +1427,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
   },
+  assistantCaptionContainer: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 172,
+    backgroundColor: 'rgba(214, 51, 132, 0.92)',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 49,
+  },
+  assistantCaptionText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+  },
   statusContainer: {
     position: 'absolute',
     left: 20,
@@ -1336,6 +1464,43 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     textAlign: 'center',
+  },
+  // Ask overlay styles
+  askContainer: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 280,
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    padding: 8,
+    alignItems: 'center',
+    zIndex: 65,
+  },
+  askInput: {
+    flex: 1,
+    height: 44,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    color: '#333',
+  },
+  askButton: {
+    marginLeft: 8,
+    backgroundColor: '#cc2b5e',
+    paddingHorizontal: 16,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  askButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
   },
   // Profile section styles
   profileSection: {

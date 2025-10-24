@@ -8,17 +8,21 @@
     "icon": "./assets/images/icon.png",
     "scheme": "https",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+  "newArchEnabled": true,
     "ios": {
-        "supportsTablet": true,
-        "infoPlist": {
-          "NSMicrophoneUsageDescription": "This app uses the microphone to let you speak to the assistant for medicines, routines, and helpful guidance.",
-          "NSMotionUsageDescription": "Motion data helps detect falls using the accelerometer and gyroscope."
-        }
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "This app uses the microphone to let you speak to the assistant for medicines, routines, and helpful guidance.",
+        "NSMotionUsageDescription": "Motion data helps detect falls using the accelerometer and gyroscope."
+      }
     },
     "android": {
       "package": "com.adithyasnair.eldercare",
-        "permissions": ["RECORD_AUDIO", "POST_NOTIFICATIONS", "CAMERA"],
+      "permissions": [
+        "RECORD_AUDIO",
+        "POST_NOTIFICATIONS",
+        "CAMERA"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -39,7 +43,12 @@
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
             "minSdkVersion": 24,
-            "kotlinVersion": "2.0.21"
+            "kotlinVersion": "2.0.21",
+            "newArchEnabled": true,
+            "gradleProperties": {
+              "android.useAndroidX": true,
+              "android.enableJetifier": true
+            }
           }
         }
       ],
@@ -53,7 +62,7 @@
         }
       ],
   "expo-web-browser",
-      "./plugins/with-android-fall-service"
+  "expo-font"
     ],
     "experiments": {
       "typedRoutes": true
